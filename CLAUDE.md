@@ -374,6 +374,17 @@ O Client Component que abre o modal atualiza o estado local com o item retornado
 
 ---
 
+## 15b. Migrations: Drizzle + Supabase MCP (obrigatório após DDL)
+
+Quando criares ou alterares ficheiros em `drizzle/migrations/` e `schema.ts`, **aplica a migração antes de dar a tarefa como concluída**:
+
+1. **Supabase MCP** (`user-supabase-mywati`): `apply_migration` com `name` em `snake_case` e `query` = conteúdo SQL do ficheiro (DDL). Regista no histórico do projeto Supabase.
+2. **Drizzle**: `npx drizzle-kit migrate` com `DATABASE_URL` carregada (ex.: `set -a && . ./.env && set +a`). Atualiza `drizzle.__drizzle_migrations`.
+
+**Armadilha:** se a BD já foi criada com `drizzle-kit push` ou só com migrations Supabase, `drizzle.__drizzle_migrations` pode estar **vazia** — nesse caso `drizzle-kit migrate` tenta `0000_init` e falha (tabelas já existem). Até fazer *baseline* do journal Drizzle, aplica migrações **novas** via MCP `apply_migration` (e mantém o SQL em `drizzle/migrations/` alinhado com o repo).
+
+---
+
 ## 16. Anti-patterns proibidos
 
 | ❌ Proibido | ✅ Correto |
@@ -396,7 +407,7 @@ O Client Component que abre o modal atualiza o estado local com o item retornado
 
 ## 17. Fluxo de uma feature nova (checklist)
 
-1. **Schema**: se precisar de nova tabela/coluna, crie migration em `drizzle/` e atualize `src/lib/db/schema.ts`.
+1. **Schema**: se precisar de nova tabela/coluna, crie migration em `drizzle/`, atualize `src/lib/db/schema.ts`, e **aplica** com Supabase MCP `apply_migration` + `drizzle-kit migrate` (ver §15b).
 2. **Query layer**: se a feature envolve contacts, adicione a query em `src/lib/contacts/queries.ts`. Para outros domínios, crie `src/lib/[dominio]/queries.ts`.
 3. **API Route**: em `src/app/api/t/[tenantId]/[recurso]/route.ts`. Siga o padrão: gate → RBAC → Zod → query → retornar item.
 4. **RSC Page**: `async function` que chama `getCachedTenantSession`, busca dados em paralelo, passa para Client Component.

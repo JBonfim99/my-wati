@@ -24,6 +24,8 @@ import { getDb } from "@/lib/db";
 import {
   contactCustomFieldDefinitions,
   contactCustomValues,
+  contactListMembers,
+  contactLists,
   contactTags,
   contacts,
   tags,
@@ -40,6 +42,7 @@ const createContactSchema = z.object({
   email: z.string().email().nullable().optional(),
   tagIds: zEightDigitIdArray.optional(),
   newTagNames: z.array(z.string()).optional(),
+  listIds: zEightDigitIdArray.optional(),
   customValues: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -228,6 +231,25 @@ export async function POST(req: NextRequest, route: RouteCtx) {
             target: [contactCustomValues.contactId, contactCustomValues.fieldId],
             set: { value, updatedAt: new Date() },
           });
+      }
+
+      for (const lid of body.listIds ?? []) {
+        const [okList] = await tx
+          .select({ id: contactLists.id })
+          .from(contactLists)
+          .where(
+            and(
+              eq(contactLists.id, lid),
+              eq(contactLists.tenantId, ctx.tenantId),
+            ),
+          )
+          .limit(1);
+        if (okList) {
+          await tx
+            .insert(contactListMembers)
+            .values({ listId: lid, contactId: contact.id })
+            .onConflictDoNothing();
+        }
       }
 
       return contact;

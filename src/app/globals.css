@@ -76,6 +76,12 @@
   }
 
   /* Surfaces */
+  /* Campanhas — superfície editorial leve (além do DS base) */
+  .campaigns-overview-root,
+  .campaigns-new-root {
+    font-feature-settings: "ss01" on, "cv11" on;
+  }
+
   .ds-card {
     @apply rounded-xl border border-border bg-card shadow-card;
   }

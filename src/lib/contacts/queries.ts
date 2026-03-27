@@ -455,3 +455,22 @@ export async function listContactLists(
     .where(eq(contactLists.tenantId, tenantId))
     .orderBy(asc(contactLists.name));
 }
+
+/** Listas das quais o contato é membro (tenant-scope). */
+export async function listContactMembershipsForContact(
+  db: AppDb,
+  tenantId: number,
+  contactId: number,
+): Promise<ContactListSummaryDto[]> {
+  return db
+    .select({ id: contactLists.id, name: contactLists.name })
+    .from(contactListMembers)
+    .innerJoin(contactLists, eq(contactLists.id, contactListMembers.listId))
+    .where(
+      and(
+        eq(contactListMembers.contactId, contactId),
+        eq(contactLists.tenantId, tenantId),
+      ),
+    )
+    .orderBy(asc(contactLists.name));
+}

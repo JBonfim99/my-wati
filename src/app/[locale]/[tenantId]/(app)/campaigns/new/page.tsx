@@ -1,9 +1,8 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
 import { getCachedTenantSession, parseTenantIdFromParam } from "@/lib/session";
 import { getDb } from "@/lib/db";
-import { contactLists } from "@/lib/db/schema";
+import { listContactListsWithMemberCounts } from "@/lib/lists/queries";
 import { NewCampaignForm } from "./_components/NewCampaignForm";
 
 export default async function NewCampaignPage({
@@ -19,10 +18,7 @@ export default async function NewCampaignPage({
   if (!ctx) redirect("/select-tenant");
 
   const db = getDb();
-  const lists = await db
-    .select({ id: contactLists.id, name: contactLists.name })
-    .from(contactLists)
-    .where(eq(contactLists.tenantId, ctx.tenantId));
+  const lists = await listContactListsWithMemberCounts(db, ctx.tenantId);
 
   return (
     <Suspense
@@ -35,7 +31,11 @@ export default async function NewCampaignPage({
     >
       <NewCampaignForm
         tenantId={String(ctx.tenantId)}
-        initialLists={lists}
+        initialLists={lists.map((l) => ({
+          id: l.id,
+          name: l.name,
+          memberCount: l.memberCount,
+        }))}
       />
     </Suspense>
   );

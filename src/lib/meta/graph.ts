@@ -44,6 +44,97 @@ export async function fetchWhatsappPhoneNumberInfo(
   };
 }
 
+export type PhoneNumberHealthData = {
+  id: string;
+  displayPhoneNumber?: string;
+  verifiedName?: string;
+  /** Qualidade do número (Meta): GREEN | YELLOW | RED | … */
+  qualityRating?: string;
+  /** Limite / escalonamento (ex.: tier, throughput). */
+  messagingLimitTier?: string;
+  /** Campo atual na Graph API (substitui gradualmente `messaging_limit_tier`). */
+  whatsappBusinessManagerMessagingLimit?: string;
+  throughput?: unknown;
+};
+
+export type PhoneNumberHealthResult =
+  | { ok: true; data: PhoneNumberHealthData }
+  | { ok: false; error: string; errorCode?: number };
+
+/**
+ * GET /{phone-number-id} — campos extra para painel (qualidade do número, tier, throughput).
+ * @see https://developers.facebook.com/docs/whatsapp/cloud-api/phone-numbers
+ */
+export async function fetchWhatsappPhoneNumberHealth(
+  accessToken: string,
+  phoneNumberId: string,
+  graphVersion: string = DEFAULT_VERSION,
+): Promise<PhoneNumberHealthResult> {
+  const tryFields = [
+    "id,display_phone_number,verified_name,quality_rating,throughput,messaging_limit_tier,whatsapp_business_manager_messaging_limit",
+    "id,display_phone_number,verified_name,quality_rating,throughput,messaging_limit_tier",
+    "id,display_phone_number,verified_name,quality_rating,throughput",
+    "id,display_phone_number,verified_name,quality_rating",
+    "id,display_phone_number,verified_name",
+  ];
+
+  for (const fields of tryFields) {
+    const url = `https://graph.facebook.com/${graphVersion}/${phoneNumberId}?fields=${encodeURIComponent(fields)}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const json = (await res.json()) as {
+      id?: string;
+      display_phone_number?: string;
+      verified_name?: string;
+      quality_rating?: string;
+      throughput?: unknown;
+      messaging_limit_tier?: string;
+      whatsapp_business_manager_messaging_limit?: string;
+      error?: { message: string; code?: number };
+    };
+    if (!res.ok || json.error) {
+      const code = json.error?.code;
+      const msg = json.error?.message ?? "";
+      if (code === 190 || code === 102) {
+        return {
+          ok: false,
+          error: msg || res.statusText,
+          errorCode: code,
+        };
+      }
+      const maybeFieldError =
+        code === 100 || /invalid|field|unknown/i.test(msg);
+      if (maybeFieldError && fields !== tryFields[tryFields.length - 1]!) {
+        continue;
+      }
+      return {
+        ok: false,
+        error: msg || res.statusText,
+        errorCode: code,
+      };
+    }
+    return {
+      ok: true,
+      data: {
+        id: json.id ?? phoneNumberId,
+        displayPhoneNumber: json.display_phone_number,
+        verifiedName: json.verified_name,
+        qualityRating: json.quality_rating,
+        messagingLimitTier: json.messaging_limit_tier,
+        whatsappBusinessManagerMessagingLimit:
+          json.whatsapp_business_manager_messaging_limit,
+        throughput: json.throughput,
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    error: "Não foi possível obter dados do número na Graph API.",
+  };
+}
+
 /** Formato esperado pela Cloud API, ex.: `pt_BR`, `en_US` (não use hífen). */
 export function normalizeWhatsappLanguageCode(raw: string): string {
   const s = raw.trim().replace(/-/g, "_");

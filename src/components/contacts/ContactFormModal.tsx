@@ -16,6 +16,7 @@ import type { SerializedContactDto } from "@/lib/contacts/dto";
 import { ContactTagsSection } from "./ContactTagsSection";
 
 export type TagDto = { id: number; name: string; slug: string };
+export type ContactListOptDto = { id: number; name: string };
 export type DefDto = {
   id: string;
   key: string;
@@ -48,6 +49,8 @@ type Props = {
   mode: "create" | "edit";
   contact: SerializedContactDto | null;
   allTags: TagDto[];
+  /** Listas da organização (para marcar participação). */
+  allLists?: ContactListOptDto[];
   definitions: DefDto[];
   readOnly: boolean;
   onClose: () => void;
@@ -62,6 +65,7 @@ export function ContactFormModal({
   mode,
   contact,
   allTags,
+  allLists = [],
   definitions,
   readOnly,
   onClose,
@@ -79,6 +83,9 @@ export function ContactFormModal({
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [copiedContactId, setCopiedContactId] = useState(false);
+  const [selectedListIds, setSelectedListIds] = useState<Set<number>>(
+    () => new Set(),
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -105,6 +112,7 @@ export function ContactFormModal({
       setName("");
       setEmail("");
       setSelectedTagIds(new Set());
+      setSelectedListIds(new Set());
       const c: Record<string, string> = {};
       for (const d of definitions) {
         c[d.id] = valueToFormString(d.defaultValue ?? null, d.fieldType);
@@ -112,6 +120,28 @@ export function ContactFormModal({
       setCustom(c);
     }
   }, [open, mode, contact, definitions]);
+
+  useEffect(() => {
+    if (!open || mode !== "edit" || !contact) {
+      if (open && mode === "create") setSelectedListIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/t/${tenantId}/contacts/${contact.id}`);
+      if (!res.ok || cancelled) return;
+      const j = (await res.json()) as {
+        contactLists?: { id: number; name: string }[];
+      };
+      setSelectedListIds(
+        new Set((j.contactLists ?? []).map((x) => x.id)),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- contact?.id é estável; evita refetch ao mudar só a referência do objeto
+  }, [open, mode, contact?.id, tenantId]);
 
   const sortedDefs = useMemo(
     () => [...definitions].sort((a, b) => a.label.localeCompare(b.label)),
@@ -160,6 +190,7 @@ export function ContactFormModal({
       name: name || null,
       email: email || null,
       tagIds: [...selectedTagIds],
+      listIds: [...selectedListIds],
       customValues,
     };
 
@@ -309,6 +340,49 @@ export function ContactFormModal({
     />
   );
 
+  const listsBlock =
+    allLists.length > 0 ? (
+      <div className="space-y-2 border-t border-border pt-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+          {t("contactListsSection")}
+        </p>
+        <ul className="max-h-44 space-y-2 overflow-y-auto rounded-xl border border-border bg-neutral-50/50 p-3">
+          {allLists.map((l) => (
+            <li key={l.id} className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id={`contact-list-${l.id}`}
+                className="h-4 w-4 rounded border-border text-primary-600"
+                checked={selectedListIds.has(l.id)}
+                onChange={(e) => {
+                  setSelectedListIds((prev) => {
+                    const next = new Set(prev);
+                    if (e.target.checked) next.add(l.id);
+                    else next.delete(l.id);
+                    return next;
+                  });
+                }}
+                disabled={readOnly}
+              />
+              <label
+                htmlFor={`contact-list-${l.id}`}
+                className="min-w-0 flex-1 cursor-pointer text-sm text-fg"
+              >
+                {l.name}
+              </label>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : (
+      <div className="border-t border-border pt-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+          {t("contactListsSection")}
+        </p>
+        <p className="mt-2 text-sm text-fg-muted">{t("contactListsEmptyHint")}</p>
+      </div>
+    );
+
   if (!open) return null;
 
   const isEditLayout = mode === "edit" && contact;
@@ -448,6 +522,7 @@ export function ContactFormModal({
                 </div>
                 <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
                   {tagsBlock}
+                  {listsBlock}
                   <div className="rounded-xl border border-primary-100 bg-primary-50/50 px-3 py-2 text-xs text-fg-secondary">
                     {t("contactBaseHint")}
                   </div>
@@ -471,6 +546,7 @@ export function ContactFormModal({
               </div>
               {systemFields}
               {tagsBlock}
+              {listsBlock}
               {customFieldsBlock}
               {err ? (
                 <p className="text-sm text-danger" role="alert">

@@ -1,7 +1,7 @@
 import "dotenv/config";
 
 import { UnrecoverableError, Worker } from "bullmq";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { processBulkContactsJob } from "@/lib/contacts/bulk-job-processor";
 import type { BulkContactsJob } from "@/lib/contacts/bulk-schema";
 import { processContactsImportJob } from "@/lib/contacts/import-job-processor";
@@ -81,6 +81,13 @@ const worker = new Worker<CampaignSendJob>(
 
     if (!campaignRow) throw new UnrecoverableError("Campaign not found");
     if (!integrationRow) throw new UnrecoverableError("Integration not configured");
+
+    await db
+      .update(campaigns)
+      .set({ status: "sending" })
+      .where(
+        and(eq(campaigns.id, campaignRow.id), eq(campaigns.status, "queued")),
+      );
 
     const token = decryptSecret(integrationRow.encryptedAccessToken);
 

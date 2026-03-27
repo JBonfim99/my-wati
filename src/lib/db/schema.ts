@@ -344,6 +344,8 @@ export const campaigns = pgTable(
       },
     ),
     status: campaignStatusEnum("status").notNull().default("draft"),
+    /** Envio agendado (UTC); null = imediato após criar. */
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     createdBy: uuid("created_by").references(() => profiles.id),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()

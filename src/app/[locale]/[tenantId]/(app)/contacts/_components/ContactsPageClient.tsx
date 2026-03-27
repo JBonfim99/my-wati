@@ -915,6 +915,7 @@ export function ContactsPageClient({
         mode={modal?.mode ?? "create"}
         contact={modal?.mode === "edit" ? modal.contact : null}
         allTags={allTags as TagDto[]}
+        allLists={allLists}
         definitions={fieldDefs as DefDto[]}
         readOnly={readOnly}
         onClose={() => setModal(null)}

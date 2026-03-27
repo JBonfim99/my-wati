@@ -7,6 +7,7 @@ import {
   getContactWithDetails,
   listContactFieldDefs,
   listAllTags,
+  listContactMembershipsForContact,
 } from "@/lib/contacts/queries";
 import { serializeContact } from "@/lib/contacts/dto";
 import { sameNormalizedCustomValue } from "@/lib/contacts/same-normalized-custom-value";
@@ -16,6 +17,8 @@ import type { ContactCustomFieldConfig } from "@/lib/db/schema";
 import { getDb } from "@/lib/db";
 import {
   contactCustomValues,
+  contactListMembers,
+  contactLists,
   contactTags,
   contacts,
   tags,
@@ -35,6 +38,7 @@ const patchContactSchema = z.object({
   email: z.string().email().nullable().optional(),
   tagIds: zEightDigitIdArray.optional(),
   newTagNames: z.array(z.string()).optional(),
+  listIds: zEightDigitIdArray.optional(),
   customValues: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -49,10 +53,11 @@ export async function GET(_req: NextRequest, route: Ctx) {
   const session = gate.ctx;
   const db = getDb();
 
-  const [contact, fieldDefs, allTags] = await Promise.all([
+  const [contact, fieldDefs, allTags, listMemberships] = await Promise.all([
     getContactWithDetails(db, session.tenantId, contactId),
     listContactFieldDefs(db, session.tenantId),
     listAllTags(db, session.tenantId),
+    listContactMembershipsForContact(db, session.tenantId, contactId),
   ]);
 
   if (!contact) {
@@ -63,6 +68,7 @@ export async function GET(_req: NextRequest, route: Ctx) {
     contact: serializeContact(contact),
     customFieldDefinitions: fieldDefs,
     allTags,
+    contactLists: listMemberships,
   });
 }
 
@@ -195,6 +201,30 @@ export async function PATCH(req: NextRequest, route: Ctx) {
           await tx
             .insert(contactTags)
             .values({ contactId: contactId, tagId: tid })
+            .onConflictDoNothing();
+        }
+      }
+    }
+
+    if (body.listIds !== undefined) {
+      await tx
+        .delete(contactListMembers)
+        .where(eq(contactListMembers.contactId, contactId));
+      for (const lid of body.listIds) {
+        const [okList] = await tx
+          .select({ id: contactLists.id })
+          .from(contactLists)
+          .where(
+            and(
+              eq(contactLists.id, lid),
+              eq(contactLists.tenantId, session.tenantId),
+            ),
+          )
+          .limit(1);
+        if (okList) {
+          await tx
+            .insert(contactListMembers)
+            .values({ listId: lid, contactId })
             .onConflictDoNothing();
         }
       }

@@ -23,6 +23,7 @@ type ApiPayload = {
   contacts: ContactDto[];
   customFieldDefinitions: DefDto[];
   allTags: TagDto[];
+  allLists: { id: number; name: string }[];
   role: string;
 };
 
@@ -499,6 +500,7 @@ export default function ContactsHub() {
         mode={modal?.mode ?? "create"}
         contact={modal?.mode === "edit" ? modal.contact : null}
         allTags={data?.allTags ?? []}
+        allLists={data?.allLists ?? []}
         definitions={data?.customFieldDefinitions ?? []}
         readOnly={readOnly}
         onClose={() => setModal(null)}
