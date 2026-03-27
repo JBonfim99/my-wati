@@ -11,6 +11,18 @@ export const CONTACT_BULK_MAX_IDS = 10_000;
 
 const TAG_FILTER_MAX = 24;
 const FIELD_CLAUSES_MAX = 12;
+const LIST_FILTER_MAX = 24;
+const LIST_CLAUSES_MAX = 8;
+
+const listClauseItemSchema = z.object({
+  op: z.enum(["in_any", "in_all", "in_none", "not_in_all"]),
+  listIds: z.array(z.string().uuid()).min(1).max(LIST_FILTER_MAX),
+});
+
+const listClausesQuerySchema = z
+  .array(listClauseItemSchema)
+  .min(1)
+  .max(LIST_CLAUSES_MAX);
 
 const systemFieldClauseSchema = z
   .object({
@@ -176,11 +188,44 @@ export function parseContactListFiltersFromSearchParams(
       resolved.clauses.length > 0 ? resolved.clauses : undefined;
   }
 
+  let listClauses: ContactListFilters["listClauses"];
+  const lfRaw = searchParams.get("lf");
+  if (lfRaw) {
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(decodeURIComponent(lfRaw)) as unknown;
+    } catch {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: "Parâmetro lf inválido (JSON)" },
+          { status: 400 },
+        ),
+      };
+    }
+    const lfParsed = listClausesQuerySchema.safeParse(parsedJson);
+    if (!lfParsed.success) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          {
+            error:
+              lfParsed.error.issues[0]?.message ??
+              "Filtro por listas inválido",
+          },
+          { status: 400 },
+        ),
+      };
+    }
+    listClauses = lfParsed.data;
+  }
+
   const hasFilters =
     Boolean(q) ||
     Boolean(systemFieldClauses && systemFieldClauses.length > 0) ||
     Boolean(tagClauses && tagClauses.length > 0) ||
-    Boolean(customFieldClauses && customFieldClauses.length > 0);
+    Boolean(customFieldClauses && customFieldClauses.length > 0) ||
+    Boolean(listClauses && listClauses.length > 0);
 
   const filters: ContactListFilters | undefined = hasFilters
     ? {
@@ -193,6 +238,7 @@ export function parseContactListFiltersFromSearchParams(
         ...(customFieldClauses && customFieldClauses.length > 0
           ? { customFieldClauses }
           : {}),
+        ...(listClauses && listClauses.length > 0 ? { listClauses } : {}),
       }
     : undefined;
 

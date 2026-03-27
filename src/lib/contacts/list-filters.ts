@@ -1,9 +1,11 @@
-import { and, eq, exists, ilike, not, or, sql } from "drizzle-orm";
+import { and, eq, exists, ilike, inArray, not, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { AppDb } from "@/lib/db";
 import {
   contactCustomFieldDefinitions,
   contactCustomValues,
+  contactListMembers,
+  contactLists,
   contactTags,
   contacts,
 } from "@/lib/db/schema";
@@ -37,6 +39,11 @@ export type ContactCustomFilterClause = {
   value?: string;
 };
 
+export type ContactListsFilterClause = {
+  op: "in_any" | "in_all" | "in_none" | "not_in_all";
+  listIds: string[];
+};
+
 export type ContactListFilters = {
   q?: string;
   /** E = todas as partes do filtro; OU = pelo menos uma (busca, cláusulas de painel). */
@@ -44,6 +51,7 @@ export type ContactListFilters = {
   systemFieldClauses?: ContactSystemFieldClause[];
   tagClauses?: ContactTagFilterClause[];
   customFieldClauses?: ContactCustomFilterClause[];
+  listClauses?: ContactListsFilterClause[];
 };
 
 function systemColumn(field: "phone" | "name" | "email") {
@@ -400,6 +408,84 @@ export function buildContactListFilterConditions(
   for (const clause of filters.customFieldClauses ?? []) {
     const sqlPart = customClauseToSql(db, tenantId, clause);
     if (sqlPart) fragments.push(sqlPart);
+  }
+
+  for (const lc of filters.listClauses ?? []) {
+    const ids = [...new Set(lc.listIds)].filter(Boolean);
+    if (ids.length === 0) continue;
+
+    const memberInSelectedLists = exists(
+      db
+        .select({ one: sql`1` })
+        .from(contactListMembers)
+        .innerJoin(contactLists, eq(contactLists.id, contactListMembers.listId))
+        .where(
+          and(
+            eq(contactListMembers.contactId, contacts.id),
+            eq(contactLists.tenantId, tenantId),
+            inArray(contactListMembers.listId, ids),
+          ),
+        ),
+    );
+
+    switch (lc.op) {
+      case "in_any":
+        fragments.push(memberInSelectedLists);
+        break;
+      case "in_none":
+        fragments.push(not(memberInSelectedLists));
+        break;
+      case "in_all": {
+        const parts = ids.map((listId) =>
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(contactListMembers)
+              .innerJoin(
+                contactLists,
+                eq(contactLists.id, contactListMembers.listId),
+              )
+              .where(
+                and(
+                  eq(contactListMembers.contactId, contacts.id),
+                  eq(contactLists.tenantId, tenantId),
+                  eq(contactListMembers.listId, listId),
+                ),
+              ),
+          ),
+        );
+        const allJoined = and(...parts);
+        if (allJoined) fragments.push(allJoined);
+        break;
+      }
+      case "not_in_all": {
+        const parts = ids.map((listId) =>
+          not(
+            exists(
+              db
+                .select({ one: sql`1` })
+                .from(contactListMembers)
+                .innerJoin(
+                  contactLists,
+                  eq(contactLists.id, contactListMembers.listId),
+                )
+                .where(
+                  and(
+                    eq(contactListMembers.contactId, contacts.id),
+                    eq(contactLists.tenantId, tenantId),
+                    eq(contactListMembers.listId, listId),
+                  ),
+                ),
+            ),
+          ),
+        );
+        const anyMissing = or(...parts);
+        if (anyMissing) fragments.push(anyMissing);
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   if (fragments.length === 0) return conditions;

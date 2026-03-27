@@ -1,4 +1,5 @@
 import type {
+  ContactListsFilterClause,
   ContactSystemFieldClause,
   ContactTagFilterClause,
 } from "@/lib/contacts/queries";
@@ -13,6 +14,8 @@ import type { FieldType } from "@/lib/contacts/validate-custom-value";
 export type TagFilterOp = "is" | "is_not";
 
 export type SystemFieldFilterOp = ContactSystemFieldClause["op"];
+
+export type ListFilterOp = ContactListsFilterClause["op"];
 
 export type ContactFilterCondition =
   | { id: string; type: "tag"; tagId: string; op: TagFilterOp }
@@ -30,6 +33,12 @@ export type ContactFilterCondition =
       fieldType: FieldType;
       op: string;
       value: string;
+    }
+  | {
+      id: string;
+      type: "list";
+      op: ListFilterOp;
+      listIds: string[];
     };
 
 export type ContactsListFilterState = {
@@ -105,6 +114,23 @@ export function addCustomFieldCondition(
   };
 }
 
+export function addListCondition(
+  state: ContactsListFilterState,
+): ContactsListFilterState {
+  return {
+    ...state,
+    conditions: [
+      ...state.conditions,
+      {
+        id: newConditionId(),
+        type: "list",
+        op: "in_any",
+        listIds: [],
+      },
+    ],
+  };
+}
+
 function conditionIsMeaningful(c: ContactFilterCondition): boolean {
   if (c.type === "tag") return Boolean(c.tagId);
   if (c.type === "field") {
@@ -115,6 +141,7 @@ function conditionIsMeaningful(c: ContactFilterCondition): boolean {
     if (!customOpNeedsValue(c.fieldType, c.op)) return true;
     return Boolean(c.value.trim());
   }
+  if (c.type === "list") return c.listIds.length > 0;
   return false;
 }
 
@@ -134,6 +161,7 @@ export function filtersToQueryParams(f: ContactsListFilterState): {
   systemFieldClauses?: ContactSystemFieldClause[];
   customRaw?: Array<{ fieldId: string; op: string; value?: string }>;
   tagClauses?: ContactTagFilterClause[];
+  listClauses?: ContactListsFilterClause[];
 } {
   const tagClauses = f.conditions
     .filter(
@@ -168,6 +196,16 @@ export function filtersToQueryParams(f: ContactsListFilterState): {
 
   const q = f.toolbarSearch.trim() || undefined;
 
+  const listClauses: ContactListsFilterClause[] = f.conditions
+    .filter(
+      (c): c is Extract<ContactFilterCondition, { type: "list" }> =>
+        c.type === "list" && c.listIds.length > 0,
+    )
+    .map((c) => ({
+      op: c.op,
+      listIds: [...new Set(c.listIds)],
+    }));
+
   return {
     conditionMatch: f.conditionMatch,
     q,
@@ -175,6 +213,7 @@ export function filtersToQueryParams(f: ContactsListFilterState): {
       systemFieldClauses.length > 0 ? systemFieldClauses : undefined,
     customRaw: customRaw.length > 0 ? customRaw : undefined,
     tagClauses: tagClauses.length > 0 ? tagClauses : undefined,
+    listClauses: listClauses.length > 0 ? listClauses : undefined,
   };
 }
 
@@ -191,7 +230,8 @@ export function buildContactsFilterQueryString(f: ContactsListFilterState): stri
     Boolean(built.q) ||
     Boolean(built.systemFieldClauses?.length) ||
     Boolean(built.tagClauses?.length) ||
-    Boolean(built.customRaw?.length);
+    Boolean(built.customRaw?.length) ||
+    Boolean(built.listClauses?.length);
   if (hasFilterPayload) {
     p.set("cm", built.conditionMatch);
   }
@@ -207,6 +247,9 @@ export function buildContactsFilterQueryString(f: ContactsListFilterState): stri
   }
   if (built.customRaw && built.customRaw.length > 0) {
     p.set("cfc", encodeURIComponent(JSON.stringify(built.customRaw)));
+  }
+  if (built.listClauses && built.listClauses.length > 0) {
+    p.set("lf", encodeURIComponent(JSON.stringify(built.listClauses)));
   }
   return p.toString();
 }
@@ -228,7 +271,8 @@ export function buildContactsListQuery(
     Boolean(built.q) ||
     Boolean(built.systemFieldClauses?.length) ||
     Boolean(built.tagClauses?.length) ||
-    Boolean(built.customRaw?.length);
+    Boolean(built.customRaw?.length) ||
+    Boolean(built.listClauses?.length);
   if (hasFilterPayload) {
     p.set("cm", built.conditionMatch);
   }
@@ -244,6 +288,9 @@ export function buildContactsListQuery(
   }
   if (built.customRaw && built.customRaw.length > 0) {
     p.set("cfc", encodeURIComponent(JSON.stringify(built.customRaw)));
+  }
+  if (built.listClauses && built.listClauses.length > 0) {
+    p.set("lf", encodeURIComponent(JSON.stringify(built.listClauses)));
   }
   if (opts?.includeTotal) p.set("total", "1");
   return p.toString();

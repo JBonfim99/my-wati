@@ -13,6 +13,7 @@ import {
   listContacts,
   listContactFieldDefs,
   listAllTags,
+  listContactLists,
   getContactWithDetails,
 } from "@/lib/contacts/queries";
 import { serializeContact, decodeCursor, encodeCursor } from "@/lib/contacts/dto";
@@ -62,9 +63,10 @@ export async function GET(req: Request, route: RouteCtx) {
 
   const includeTotal = url.searchParams.get("total") === "1" && !cursor;
 
-  const [fieldDefs, allTags] = await Promise.all([
+  const [fieldDefs, allTags, allLists] = await Promise.all([
     listContactFieldDefs(db, ctx.tenantId),
     listAllTags(db, ctx.tenantId),
+    listContactLists(db, ctx.tenantId),
   ]);
 
   const parsedFilters = parseContactListFiltersFromSearchParams(
@@ -95,6 +97,7 @@ export async function GET(req: Request, route: RouteCtx) {
     ...(includeTotal && totalCount !== undefined ? { total: totalCount } : {}),
     customFieldDefinitions: fieldDefs,
     allTags,
+    allLists,
     role: ctx.role,
   });
 }

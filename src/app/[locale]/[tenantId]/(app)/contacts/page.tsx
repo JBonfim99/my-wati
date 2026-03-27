@@ -6,6 +6,7 @@ import {
   listContacts,
   listContactFieldDefs,
   listAllTags,
+  listContactLists,
 } from "@/lib/contacts/queries";
 import { serializeContact, encodeCursor } from "@/lib/contacts/dto";
 import { CONTACTS_LIST_PAGE_SIZE } from "./_components/contacts-list-query";
@@ -28,11 +29,13 @@ export default async function ContactsPage({
     { contacts: rawContacts, nextCursor: rawCursor },
     fieldDefs,
     allTags,
+    allLists,
     initialTotal,
   ] = await Promise.all([
     listContacts(db, ctx.tenantId, { limit: CONTACTS_LIST_PAGE_SIZE }),
     listContactFieldDefs(db, ctx.tenantId),
     listAllTags(db, ctx.tenantId),
+    listContactLists(db, ctx.tenantId),
     countContacts(db, ctx.tenantId, undefined),
   ]);
 
@@ -50,6 +53,7 @@ export default async function ContactsPage({
       initialTotal={initialTotal}
       fieldDefs={fieldDefs}
       allTags={allTags}
+      allLists={allLists}
     />
   );
 }

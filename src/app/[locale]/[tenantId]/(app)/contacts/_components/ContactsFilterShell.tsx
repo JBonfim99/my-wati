@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   Filter,
+  ListOrdered,
   Mail,
   Phone,
   Search,
@@ -23,19 +24,23 @@ import type { FieldType } from "@/lib/contacts/validate-custom-value";
 import {
   addCustomFieldCondition,
   addFieldCondition,
+  addListCondition,
   addTagCondition,
   countMeaningfulFilterParts,
   type ContactFilterCondition,
   type ContactsListFilterState,
+  type ListFilterOp,
 } from "./contacts-list-query";
 
 type TagOpt = { id: string; name: string };
+type ListOpt = { id: string; name: string };
 type FieldDefOpt = { id: string; label: string; fieldType: FieldType };
 
 type CategoryId = "general" | "system" | "custom";
 
 type Props = {
   allTags: TagOpt[];
+  allLists: ListOpt[];
   fieldDefs: FieldDefOpt[];
   value: ContactsListFilterState;
   onChange: (next: ContactsListFilterState) => void;
@@ -54,10 +59,13 @@ type Props = {
   onBulkSetCustomClick: () => void;
   onBulkClearCustomClick: () => void;
   onBulkExportCsvClick: () => void;
+  onBulkAddListClick: () => void;
+  onBulkRemoveListClick: () => void;
 };
 
 export function ContactsFilterShell({
   allTags,
+  allLists,
   fieldDefs,
   value,
   onChange,
@@ -76,6 +84,8 @@ export function ContactsFilterShell({
   onBulkSetCustomClick,
   onBulkClearCustomClick,
   onBulkExportCsvClick,
+  onBulkAddListClick,
+  onBulkRemoveListClick,
 }: Props) {
   const t = useTranslations("app.contacts");
   const [addOpen, setAddOpen] = useState(false);
@@ -96,6 +106,11 @@ export function ContactsFilterShell({
   const sortedTags = useMemo(
     () => [...allTags].sort((a, b) => a.name.localeCompare(b.name)),
     [allTags],
+  );
+
+  const sortedLists = useMemo(
+    () => [...allLists].sort((a, b) => a.name.localeCompare(b.name)),
+    [allLists],
   );
 
   const sortedFieldDefs = useMemo(
@@ -119,7 +134,10 @@ export function ContactsFilterShell({
   ).filter((c) => !pickerQ || c.label.toLowerCase().includes(pickerQ));
 
   const generalOptions = useMemo(
-    () => [{ id: "tag", label: t("filterFieldTag"), Icon: TagIcon }],
+    () => [
+      { id: "tag" as const, label: t("filterFieldTag"), Icon: TagIcon },
+      { id: "list" as const, label: t("filterFieldList"), Icon: ListOrdered },
+    ],
     [t],
   );
 
@@ -157,11 +175,13 @@ export function ContactsFilterShell({
     });
   }
 
-  function pickOption(kind: "tag" | "phone" | "name" | "email") {
+  function pickOption(kind: "tag" | "list" | "phone" | "name" | "email") {
     setAddOpen(false);
     setPickerSearch("");
     if (kind === "tag") {
       onChange(addTagCondition(value));
+    } else if (kind === "list") {
+      onChange(addListCondition(value));
     } else {
       onChange(addFieldCondition(value, kind));
     }
@@ -285,6 +305,36 @@ export function ContactsFilterShell({
                 }}
               >
                 {t("bulkRemoveTag")}
+              </button>
+              <button
+                type="button"
+                className="flex w-full px-3 py-2 text-left text-sm hover:bg-neutral-100 disabled:pointer-events-none disabled:opacity-40"
+                disabled={selectedCount === 0}
+                onClick={(e) => {
+                  (
+                    e.currentTarget.closest(
+                      "details",
+                    ) as HTMLDetailsElement | null
+                  )?.removeAttribute("open");
+                  onBulkAddListClick();
+                }}
+              >
+                {t("bulkAddList")}
+              </button>
+              <button
+                type="button"
+                className="flex w-full px-3 py-2 text-left text-sm hover:bg-neutral-100 disabled:pointer-events-none disabled:opacity-40"
+                disabled={selectedCount === 0}
+                onClick={(e) => {
+                  (
+                    e.currentTarget.closest(
+                      "details",
+                    ) as HTMLDetailsElement | null
+                  )?.removeAttribute("open");
+                  onBulkRemoveListClick();
+                }}
+              >
+                {t("bulkRemoveList")}
               </button>
               <button
                 type="button"
@@ -446,6 +496,81 @@ export function ContactsFilterShell({
                           </option>
                         ))}
                       </select>
+                    </>
+                  ) : c.type === "list" ? (
+                    <>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-fg-secondary">
+                        {t("filterFieldList")}
+                      </p>
+                      <p className="mt-2 text-xs font-medium text-fg-secondary">
+                        {t("filterOperatorLabel")}
+                      </p>
+                      <select
+                        className="ds-input mt-1 max-w-full"
+                        value={c.op}
+                        onChange={(e) =>
+                          patchCondition(c.id, (row) =>
+                            row.type === "list"
+                              ? {
+                                  ...row,
+                                  op: e.target.value as ListFilterOp,
+                                }
+                              : row,
+                          )
+                        }
+                      >
+                        <option value="in_any">
+                          {t("filterListOpInAny")}
+                        </option>
+                        <option value="in_all">
+                          {t("filterListOpInAll")}
+                        </option>
+                        <option value="not_in_all">
+                          {t("filterListOpNotInAll")}
+                        </option>
+                        <option value="in_none">
+                          {t("filterListOpInNone")}
+                        </option>
+                      </select>
+                      <p className="mt-3 text-sm text-fg">
+                        {t("filterListWhich")}
+                      </p>
+                      {sortedLists.length === 0 ? (
+                        <p className="mt-2 text-sm text-fg-muted">
+                          {t("filterNoListsInOrg")}
+                        </p>
+                      ) : (
+                        <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border bg-neutral-50/50 p-2">
+                          {sortedLists.map((lst) => {
+                            const checked = c.listIds.includes(lst.id);
+                            return (
+                              <li key={lst.id}>
+                                <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-neutral-100">
+                                  <input
+                                    type="checkbox"
+                                    className="rounded border-border"
+                                    checked={checked}
+                                    onChange={() =>
+                                      patchCondition(c.id, (row) => {
+                                        if (row.type !== "list") return row;
+                                        const next = new Set(row.listIds);
+                                        if (next.has(lst.id))
+                                          next.delete(lst.id);
+                                        else next.add(lst.id);
+                                        return {
+                                          ...row,
+                                          listIds: [...next],
+                                        };
+                                      })
+                                    }
+                                  />
+                                  <span className="truncate">{lst.name}</span>
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
                     </>
                   ) : c.type === "field" ? (
                     <>
@@ -679,7 +804,7 @@ export function ContactsFilterShell({
                                 <button
                                   type="button"
                                   className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-neutral-100"
-                                  onClick={() => pickOption("tag")}
+                                  onClick={() => pickOption(o.id)}
                                 >
                                   <o.Icon
                                     className="h-4 w-4 shrink-0 text-fg-muted"

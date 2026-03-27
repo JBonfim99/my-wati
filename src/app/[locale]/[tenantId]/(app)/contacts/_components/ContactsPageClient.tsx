@@ -7,6 +7,7 @@ import { Link } from "@/i18n/navigation";
 import type { SerializedContactDto } from "@/lib/contacts/dto";
 import type {
   ContactCustomFieldDefDto,
+  ContactListSummaryDto,
   ContactTagDto,
 } from "@/lib/contacts/queries";
 import { validateAndNormalizeCustomValue } from "@/lib/contacts/validate-custom-value";
@@ -44,12 +45,15 @@ type Props = {
   initialTotal: number;
   fieldDefs: ContactCustomFieldDefDto[];
   allTags: ContactTagDto[];
+  allLists: ContactListSummaryDto[];
 };
 
 type BulkExtraModal =
   | null
   | { kind: "add_tags" }
   | { kind: "remove_tags" }
+  | { kind: "add_lists" }
+  | { kind: "remove_lists" }
   | { kind: "set_custom" }
   | { kind: "clear_custom" };
 
@@ -61,6 +65,7 @@ export function ContactsPageClient({
   initialTotal,
   fieldDefs: initialFieldDefs,
   allTags: initialAllTags,
+  allLists: initialAllLists,
 }: Props) {
   const t = useTranslations("app.contacts");
   const readOnly = role === "support";
@@ -76,6 +81,7 @@ export function ContactsPageClient({
   const [fieldDefs, setFieldDefs] = useState(initialFieldDefs);
   const [fieldDefsRefresh, setFieldDefsRefresh] = useState(0);
   const [allTags, setAllTags] = useState(initialAllTags);
+  const [allLists, setAllLists] = useState(initialAllLists);
 
   const [listFilters, setListFilters] = useState<ContactsListFilterState>(
     () => emptyContactsListFilter(),
@@ -140,6 +146,7 @@ export function ContactsPageClient({
 
   const [bulkExtra, setBulkExtra] = useState<BulkExtraModal>(null);
   const [bulkTagPick, setBulkTagPick] = useState<Set<string>>(() => new Set());
+  const [bulkListPick, setBulkListPick] = useState<Set<string>>(() => new Set());
   const [bulkCustomFieldId, setBulkCustomFieldId] = useState("");
   const [bulkCustomValueRaw, setBulkCustomValueRaw] = useState("");
   const [bulkOpBusy, setBulkOpBusy] = useState(false);
@@ -152,6 +159,11 @@ export function ContactsPageClient({
   const sortedTagsForModal = useMemo(
     () => [...allTags].sort((a, b) => a.name.localeCompare(b.name)),
     [allTags],
+  );
+
+  const sortedListsForModal = useMemo(
+    () => [...allLists].sort((a, b) => a.name.localeCompare(b.name)),
+    [allLists],
   );
 
   const sortedFieldDefsForModal = useMemo(
@@ -193,7 +205,9 @@ export function ContactsPageClient({
         contacts: SerializedContactDto[];
         nextCursor: string | null;
         total?: number;
+        allLists?: ContactListSummaryDto[];
       };
+      if (j.allLists) setAllLists(j.allLists);
       return j;
     },
     [api],
@@ -394,6 +408,16 @@ export function ContactsPageClient({
     setBulkExtra({ kind: "remove_tags" });
   }
 
+  function openBulkAddLists() {
+    setBulkListPick(new Set());
+    setBulkExtra({ kind: "add_lists" });
+  }
+
+  function openBulkRemoveLists() {
+    setBulkListPick(new Set());
+    setBulkExtra({ kind: "remove_lists" });
+  }
+
   function openBulkSetCustom() {
     setBulkCustomFieldId(sortedFieldDefsForModal[0]?.id ?? "");
     setBulkCustomValueRaw("");
@@ -411,6 +435,18 @@ export function ContactsPageClient({
 
   function removeBulkTagPick(id: string) {
     setBulkTagPick((prev) => {
+      const n = new Set(prev);
+      n.delete(id);
+      return n;
+    });
+  }
+
+  function addBulkListPick(id: string) {
+    setBulkListPick((prev) => new Set(prev).add(id));
+  }
+
+  function removeBulkListPick(id: string) {
+    setBulkListPick((prev) => {
       const n = new Set(prev);
       n.delete(id);
       return n;
@@ -462,6 +498,32 @@ export function ContactsPageClient({
         bulkExtra.kind === "add_tags"
           ? t("bulkFeedbackTagsAdded")
           : t("bulkFeedbackTagsRemoved"),
+      );
+      return;
+    }
+
+    if (bulkExtra.kind === "add_lists" || bulkExtra.kind === "remove_lists") {
+      const listIds = [...bulkListPick];
+      if (listIds.length === 0) return;
+      setBulkOpBusy(true);
+      const res = await fetch(bulkApi, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          bulkExtra.kind === "add_lists"
+            ? { op: "add_to_lists", ids, listIds }
+            : { op: "remove_from_lists", ids, listIds },
+        ),
+      });
+      setBulkOpBusy(false);
+      if (!res.ok) return;
+      setBulkExtra(null);
+      await refreshFirstPage();
+      setSelectedIds(new Set());
+      showBulkSuccess(
+        bulkExtra.kind === "add_lists"
+          ? t("bulkFeedbackListsAdded")
+          : t("bulkFeedbackListsRemoved"),
       );
       return;
     }
@@ -534,11 +596,15 @@ export function ContactsPageClient({
       ? t("bulkAddTagTitle")
       : bulkExtra?.kind === "remove_tags"
         ? t("bulkRemoveTagTitle")
-        : bulkExtra?.kind === "set_custom"
-          ? t("bulkSetCustomTitle")
-          : bulkExtra?.kind === "clear_custom"
-            ? t("bulkClearCustomTitle")
-            : "";
+        : bulkExtra?.kind === "add_lists"
+          ? t("bulkAddListTitle")
+          : bulkExtra?.kind === "remove_lists"
+            ? t("bulkRemoveListTitle")
+            : bulkExtra?.kind === "set_custom"
+              ? t("bulkSetCustomTitle")
+              : bulkExtra?.kind === "clear_custom"
+                ? t("bulkClearCustomTitle")
+                : "";
 
   return (
     <div className="space-y-8 pb-10">
@@ -617,6 +683,7 @@ export function ContactsPageClient({
         <>
           <ContactsFilterShell
             allTags={allTags}
+            allLists={allLists}
             fieldDefs={fieldDefs.map((d) => ({
               id: d.id,
               label: d.label,
@@ -636,6 +703,8 @@ export function ContactsPageClient({
             onBulkDeleteClick={() => setBulkDeleteOpen(true)}
             onBulkAddTagClick={() => openBulkAddTags()}
             onBulkRemoveTagClick={() => openBulkRemoveTags()}
+            onBulkAddListClick={() => openBulkAddLists()}
+            onBulkRemoveListClick={() => openBulkRemoveLists()}
             onBulkSetCustomClick={() => openBulkSetCustom()}
             onBulkClearCustomClick={() => openBulkClearCustom()}
             onBulkExportCsvClick={() => void handleBulkExportCsv()}
@@ -781,6 +850,31 @@ export function ContactsPageClient({
               </>
             ) : null}
 
+            {bulkExtra.kind === "add_lists" ||
+            bulkExtra.kind === "remove_lists" ? (
+              <>
+                <p className="mt-2 text-sm text-fg-secondary">
+                  {bulkExtra.kind === "add_lists"
+                    ? t("bulkAddListHint")
+                    : t("bulkRemoveListHint")}
+                </p>
+                {sortedListsForModal.length === 0 ? (
+                  <p className="mt-4 text-sm text-fg-muted">
+                    {t("filterNoListsInOrg")}
+                  </p>
+                ) : (
+                  <BulkTagSearchField
+                    key={bulkExtra.kind}
+                    variant="lists"
+                    tags={sortedListsForModal}
+                    selectedIds={bulkListPick}
+                    onAdd={addBulkListPick}
+                    onRemove={removeBulkListPick}
+                  />
+                )}
+              </>
+            ) : null}
+
             {bulkExtra.kind === "set_custom" ||
             bulkExtra.kind === "clear_custom" ? (
               <>
@@ -838,6 +932,10 @@ export function ContactsPageClient({
                   (bulkExtra.kind === "add_tags" ||
                   bulkExtra.kind === "remove_tags"
                     ? bulkTagPick.size === 0
+                    : false) ||
+                  (bulkExtra.kind === "add_lists" ||
+                  bulkExtra.kind === "remove_lists"
+                    ? bulkListPick.size === 0
                     : false) ||
                   (bulkExtra.kind === "set_custom" &&
                     (sortedFieldDefsForModal.length === 0 ||

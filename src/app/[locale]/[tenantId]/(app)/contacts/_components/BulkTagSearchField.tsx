@@ -11,6 +11,8 @@ type Props = {
   selectedIds: Set<string>;
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
+  /** "lists" usa chaves i18n de listas (mesma UX de busca em massa). */
+  variant?: "tags" | "lists";
 };
 
 export function BulkTagSearchField({
@@ -18,8 +20,10 @@ export function BulkTagSearchField({
   selectedIds,
   onAdd,
   onRemove,
+  variant = "tags",
 }: Props) {
   const t = useTranslations("app.contacts");
+  const isLists = variant === "lists";
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -64,7 +68,11 @@ export function BulkTagSearchField({
               <button
                 type="button"
                 className="rounded-full p-0.5 text-primary-700 hover:bg-primary-100"
-                aria-label={t("bulkTagRemoveFromSelection", { name: tg.name })}
+                aria-label={
+                  isLists
+                    ? t("bulkListRemoveFromSelection", { name: tg.name })
+                    : t("bulkTagRemoveFromSelection", { name: tg.name })
+                }
                 onClick={() => onRemove(tg.id)}
               >
                 <X className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
@@ -75,7 +83,7 @@ export function BulkTagSearchField({
       ) : null}
 
       <label className="block text-sm font-medium text-fg">
-        {t("bulkTagSearchLabel")}
+        {isLists ? t("bulkListSearchLabel") : t("bulkTagSearchLabel")}
         <input
           type="search"
           autoComplete="off"
@@ -87,7 +95,11 @@ export function BulkTagSearchField({
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
-          placeholder={t("bulkTagSearchPlaceholder")}
+          placeholder={
+            isLists
+              ? t("bulkListSearchPlaceholder")
+              : t("bulkTagSearchPlaceholder")
+          }
         />
       </label>
 
@@ -98,11 +110,11 @@ export function BulkTagSearchField({
         >
           {!qNorm ? (
             <p className="px-3 py-3 text-sm text-fg-muted">
-              {t("bulkTagTypeToFilter")}
+              {isLists ? t("bulkListTypeToFilter") : t("bulkTagTypeToFilter")}
             </p>
           ) : suggestions.length === 0 ? (
             <p className="px-3 py-3 text-sm text-fg-muted">
-              {t("bulkTagNoMatches")}
+              {isLists ? t("bulkListNoMatches") : t("bulkTagNoMatches")}
             </p>
           ) : (
             <ul className="py-0.5">

@@ -14,6 +14,7 @@ import type { AppDb } from "@/lib/db";
 import {
   contactCustomFieldDefinitions,
   contactCustomValues,
+  contactLists,
   contactTags,
   contacts,
   tags,
@@ -50,6 +51,7 @@ export type ContactCursor = { updatedAt: string; id: string };
 export type {
   ContactCustomFilterClause,
   ContactListFilters,
+  ContactListsFilterClause,
   ContactSystemFieldClause,
   ContactSystemFieldOp,
   ContactTagFilterClause,
@@ -322,4 +324,17 @@ export async function listAllTags(
     .from(tags)
     .where(eq(tags.tenantId, tenantId))
     .orderBy(asc(tags.name));
+}
+
+export type ContactListSummaryDto = { id: string; name: string };
+
+export async function listContactLists(
+  db: AppDb,
+  tenantId: number,
+): Promise<ContactListSummaryDto[]> {
+  return db
+    .select({ id: contactLists.id, name: contactLists.name })
+    .from(contactLists)
+    .where(eq(contactLists.tenantId, tenantId))
+    .orderBy(asc(contactLists.name));
 }
