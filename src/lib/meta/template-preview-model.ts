@@ -13,8 +13,7 @@ export type PreviewHeader =
 
 export type PreviewButton =
   | { kind: "url"; text: string; href?: string }
-  | { kind: "quick_reply"; text: string }
-  | { kind: "phone"; text: string; phone?: string };
+  | { kind: "quick_reply"; text: string };
 
 export type TemplatePreviewModel = {
   header: PreviewHeader;
@@ -118,11 +117,6 @@ export function parseTemplatePreviewModel(
           });
         } else if (bt === "QUICK_REPLY") {
           out.buttons.push({ kind: "quick_reply", text });
-        } else if (bt === "PHONE_NUMBER") {
-          const phone = String(
-            (btn as { phone_number?: string }).phone_number ?? "",
-          ).trim();
-          out.buttons.push({ kind: "phone", text, phone: phone || undefined });
         }
       }
     }
@@ -135,16 +129,24 @@ export function applySamplesToTemplatePreviewModel(
   model: TemplatePreviewModel,
   state: TemplateFormState,
 ): TemplatePreviewModel {
-  let urlDynIdx = 0;
+  const { samples } = state;
   const buttons: PreviewButton[] = model.buttons.map((b) => {
     if (b.kind !== "url") return { ...b };
     const href = b.href;
     if (!href || !href.includes("{{")) return { ...b };
-    const sk = `url_${urlDynIdx}`;
-    urlDynIdx++;
+    if (state.parameterFormat === "named") {
+      return {
+        ...b,
+        href: href.replace(NAMED_PH, (_, name: string) =>
+          samples[name]?.trim() ? samples[name]! : `{{${name}}}`,
+        ),
+      };
+    }
     return {
       ...b,
-      href: href.replace(/\{\{1\}\}/g, state.samples[sk] ?? "…"),
+      href: href.replace(POS_PH, (_, d: string) =>
+        samples[`p${d}`]?.trim() ? samples[`p${d}`]! : `{{${d}}}`,
+      ),
     };
   });
 

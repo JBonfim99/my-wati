@@ -9,10 +9,10 @@ import type { TemplateContactVariableRow } from "@/lib/templates/contact-templat
 import {
   canAddDraftButton,
   componentsFromFormStateForPreview,
-  dynamicUrlStaticPrefix,
+  extractNamedPlaceholders,
   getSampleFieldDescriptors,
+  normalizeUrlWithHttps,
   serializeDraftPayload,
-  urlDynamicSampleKeyForButton,
   validateForMetaSubmit,
 } from "@/lib/meta/template-create-payload";
 import {
@@ -183,13 +183,11 @@ export function TemplateCreatePageClient({
     }));
   }
 
-  function addButtonRow(kind: "url" | "quick_reply" | "phone") {
+  function addButtonRow(kind: "url" | "quick_reply") {
     const id = newButtonId();
     let next: DraftButton;
     if (kind === "url") {
-      next = { id, kind: "url", text: "", mode: "static", url: "https://" };
-    } else if (kind === "phone") {
-      next = { id, kind: "phone", text: "", phone: "" };
+      next = { id, kind: "url", text: "", url: "https://" };
     } else {
       next = { id, kind: "quick_reply", text: "" };
     }
@@ -451,19 +449,6 @@ export function TemplateCreatePageClient({
                   >
                     {t("addQrButton")}
                   </button>
-                  <button
-                    type="button"
-                    className="ds-btn-outline ds-btn-sm disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={!canAddDraftButton(state.buttons, "phone")}
-                    title={
-                      !canAddDraftButton(state.buttons, "phone")
-                        ? t("buttonsLimitHint")
-                        : undefined
-                    }
-                    onClick={() => addButtonRow("phone")}
-                  >
-                    {t("addPhoneButton")}
-                  </button>
                 </div>
                 <p className="text-xs text-fg-muted">{t("buttonsLimitsDoc")}</p>
                 <ul className="space-y-4">
@@ -474,11 +459,7 @@ export function TemplateCreatePageClient({
                     >
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <span className="text-xs font-semibold uppercase text-fg-muted">
-                          {b.kind === "url"
-                            ? t("btnTypeUrl")
-                            : b.kind === "phone"
-                              ? t("btnTypePhone")
-                              : t("btnTypeQr")}
+                          {b.kind === "url" ? t("btnTypeUrl") : t("btnTypeQr")}
                         </span>
                         <button
                           type="button"
@@ -497,141 +478,31 @@ export function TemplateCreatePageClient({
                       />
                       {b.kind === "url" ? (
                         <div className="mt-3 space-y-2">
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="radio"
-                              checked={b.mode === "static"}
-                              onChange={() =>
-                                updateButton(b.id, {
-                                  kind: "url",
-                                  text: b.text,
-                                  mode: "static",
-                                  url:
-                                    b.mode === "dynamic" ? "https://" : b.url,
-                                } as DraftButton)
-                              }
-                            />
-                            {t("urlStatic")}
+                          <label className="ds-label text-xs" htmlFor={`url-${b.id}`}>
+                            {t("urlFieldLabel")}
                           </label>
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="radio"
-                              checked={b.mode === "dynamic"}
-                              onChange={() =>
-                                updateButton(b.id, {
-                                  kind: "url",
-                                  text: b.text,
-                                  mode: "dynamic",
-                                  baseUrl:
-                                    b.mode === "static"
-                                      ? b.url.replace(/\{\{1\}\}\s*$/, "").trim()
-                                      : b.baseUrl,
-                                  suffixVariableLabel:
-                                    b.mode === "dynamic"
-                                      ? b.suffixVariableLabel
-                                      : "",
-                                } as DraftButton)
+                          <input
+                            id={`url-${b.id}`}
+                            className="ds-input font-mono text-sm"
+                            placeholder={t("urlFieldPlaceholder")}
+                            value={b.url}
+                            onChange={(e) =>
+                              updateButton(b.id, { url: e.target.value } as DraftButton)
+                            }
+                            onBlur={() => {
+                              const u = normalizeUrlWithHttps(b.url);
+                              if (u !== b.url) {
+                                updateButton(b.id, { url: u } as DraftButton);
                               }
-                            />
-                            {t("urlDynamic")}
-                          </label>
-                          {b.mode === "static" ? (
-                            <input
-                              className="ds-input"
-                              placeholder="https://"
-                              value={b.url}
-                              onChange={(e) =>
-                                updateButton(b.id, { url: e.target.value } as DraftButton)
-                              }
-                            />
-                          ) : (
-                            <>
-                              <input
-                                className="ds-input"
-                                placeholder={t("urlBasePlaceholder")}
-                                value={b.baseUrl}
-                                onChange={(e) =>
-                                  updateButton(b.id, {
-                                    baseUrl: e.target.value,
-                                  } as DraftButton)
-                                }
-                              />
-                              <div className="mt-2">
-                                <label className="ds-label text-xs">
-                                  {t("urlSuffixVariableLabel")}
-                                </label>
-                                <input
-                                  className="ds-input mt-1"
-                                  placeholder={t("urlSuffixVariablePlaceholder")}
-                                  value={b.suffixVariableLabel}
-                                  onChange={(e) =>
-                                    updateButton(b.id, {
-                                      suffixVariableLabel: e.target.value,
-                                    } as DraftButton)
-                                  }
-                                />
-                                {b.baseUrl.trim() || b.suffixVariableLabel.trim() ? (
-                                  <p className="mt-2 rounded-lg bg-neutral-100 px-2.5 py-2 font-mono text-[11px] leading-snug text-fg-secondary break-all">
-                                    <span className="block text-[10px] font-sans font-medium uppercase tracking-wide text-fg-muted">
-                                      {t("urlDynamicPrefixPreview")}
-                                    </span>
-                                    {dynamicUrlStaticPrefix(b.baseUrl, b.suffixVariableLabel)}
-                                    <span className="text-primary-700">{"{{1}}"}</span>
-                                  </p>
-                                ) : null}
-                              </div>
-                              {b.baseUrl.trim() ? (
-                                <div className="mt-2">
-                                  <label
-                                    className="ds-label text-xs"
-                                    htmlFor={`url-suf-${b.id}`}
-                                  >
-                                    {t("urlSuffixSampleLabel")}
-                                  </label>
-                                  <input
-                                    id={`url-suf-${b.id}`}
-                                    className="ds-input mt-1"
-                                    placeholder={t("urlSuffixSamplePlaceholder")}
-                                    value={
-                                      state.samples[
-                                        urlDynamicSampleKeyForButton(
-                                          state.buttons,
-                                          b.id,
-                                        )
-                                      ] ?? ""
-                                    }
-                                    onChange={(e) => {
-                                      const sk = urlDynamicSampleKeyForButton(
-                                        state.buttons,
-                                        b.id,
-                                      );
-                                      setState((s) => ({
-                                        ...s,
-                                        samples: {
-                                          ...s.samples,
-                                          [sk]: e.target.value,
-                                        },
-                                      }));
-                                    }}
-                                  />
-                                  <p className="mt-1 text-[11px] text-fg-muted">
-                                    {t("urlSuffixSampleHint")}
-                                  </p>
-                                </div>
-                              ) : null}
-                            </>
-                          )}
+                            }}
+                          />
+                          {extractNamedPlaceholders(b.url).length > 0 ? (
+                            <p className="text-[11px] text-fg-muted">
+                              {t("urlVarsShareSamples")}
+                            </p>
+                          ) : null}
+                          <p className="text-[11px] text-fg-muted">{t("urlHttpsHint")}</p>
                         </div>
-                      ) : null}
-                      {b.kind === "phone" ? (
-                        <input
-                          className="ds-input mt-2"
-                          placeholder={t("phonePlaceholder")}
-                          value={b.phone}
-                          onChange={(e) =>
-                            updateButton(b.id, { phone: e.target.value } as DraftButton)
-                          }
-                        />
                       ) : null}
                     </li>
                   ))}

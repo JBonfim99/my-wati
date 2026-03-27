@@ -19,26 +19,8 @@ export const TEMPLATE_FORM_SCHEMA_VERSION = 1;
 export type ParameterFormatChoice = "named" | "positional";
 
 export type DraftButton =
-  | {
-      id: string;
-      kind: "url";
-      text: string;
-      mode: "static";
-      url: string;
-    }
-  | {
-      id: string;
-      kind: "url";
-      text: string;
-      mode: "dynamic";
-      baseUrl: string;
-      /**
-       * Texto colado ao fim da URL base antes de {{1}} (path, query, etc.).
-       */
-      suffixVariableLabel: string;
-    }
-  | { id: string; kind: "quick_reply"; text: string }
-  | { id: string; kind: "phone"; text: string; phone: string };
+  | { id: string; kind: "url"; text: string; url: string }
+  | { id: string; kind: "quick_reply"; text: string };
 
 export type TemplateFormState = {
   schemaVersion: number;
@@ -52,7 +34,7 @@ export type TemplateFormState = {
   footer: string;
   buttonsEnabled: boolean;
   buttons: DraftButton[];
-  /** named: param name → sample; positional body: "p1","p2" for {{1}},{{2}}; URL dynamic: url_<buttonIndex> */
+  /** named: param name → sample (corpo, cabeçalho e URL compartilham a mesma chave); posicional: p1, p2… */
   samples: Record<string, string>;
 };
 
@@ -61,7 +43,6 @@ const FOOTER_MAX = 60;
 const HEADER_MAX = 60;
 const BTN_LABEL_MAX = 25;
 const URL_MAX = 2000;
-const PHONE_BTN_MAX = 20;
 /** Limite total de botões por modelo (WhatsApp Business Platform). */
 const BUTTONS_TOTAL_MAX = 10;
 
@@ -111,40 +92,28 @@ export function parseTemplateFormPayload(raw: unknown): TemplateFormState {
       if (!b || typeof b !== "object") continue;
       const x = b as Record<string, unknown>;
       const id = typeof x.id === "string" ? x.id : newBtnId();
-      const kind = x.kind === "quick_reply" ? "quick_reply" : x.kind === "phone" ? "phone" : "url";
+      if (x.kind === "phone") continue;
+      const kind = x.kind === "quick_reply" ? "quick_reply" : "url";
       const text = typeof x.text === "string" ? x.text : "";
       if (kind === "quick_reply") {
         buttons.push({ id, kind: "quick_reply", text });
-      } else if (kind === "phone") {
+      } else {
+        const legacy = x as Record<string, unknown>;
+        let urlStr = typeof x.url === "string" ? x.url : "";
+        if (!urlStr && legacy.mode === "dynamic") {
+          const base = typeof legacy.baseUrl === "string" ? legacy.baseUrl : "";
+          const suf =
+            typeof legacy.suffixVariableLabel === "string"
+              ? legacy.suffixVariableLabel
+              : "";
+          urlStr = `${base.trim()}${suf.trim()}{{1}}`;
+        }
         buttons.push({
           id,
-          kind: "phone",
+          kind: "url",
           text,
-          phone: typeof x.phone === "string" ? x.phone : "",
+          url: urlStr,
         });
-      } else {
-        const mode = x.mode === "dynamic" ? "dynamic" : "static";
-        if (mode === "dynamic") {
-          buttons.push({
-            id,
-            kind: "url",
-            text,
-            mode: "dynamic",
-            baseUrl: typeof x.baseUrl === "string" ? x.baseUrl : "",
-            suffixVariableLabel:
-              typeof x.suffixVariableLabel === "string"
-                ? x.suffixVariableLabel
-                : "",
-          });
-        } else {
-          buttons.push({
-            id,
-            kind: "url",
-            text,
-            mode: "static",
-            url: typeof x.url === "string" ? x.url : "",
-          });
-        }
       }
     }
   }
@@ -218,16 +187,35 @@ function hasNamed(text: string): boolean {
   return NAMED_PH.test(text);
 }
 
-export function urlSuffixSampleKey(buttonIndex: number): string {
-  return `url_${buttonIndex}`;
+/**
+ * Garante esquema https:// e remove duplicatas do tipo https://https://… no início.
+ */
+export function normalizeUrlWithHttps(raw: string): string {
+  const s = raw.trim();
+  if (!s) return "https://";
+  let t = s;
+  const lower = t.toLowerCase();
+  if (lower.startsWith("https://")) {
+    t = t.slice("https://".length);
+    while (t.toLowerCase().startsWith("https://")) {
+      t = t.slice("https://".length);
+    }
+    return `https://${t.replace(/^\/+/, "")}`;
+  }
+  if (lower.startsWith("http://")) {
+    return `https://${t.slice("http://".length).replace(/^\/+/, "")}`;
+  }
+  return `https://${t.replace(/^\/+/, "")}`;
 }
 
-/** Parte fixa da URL dinâmica (antes de {{1}}): URL base + sufixo do formulário. */
-export function dynamicUrlStaticPrefix(
-  baseUrl: string,
-  suffixSegment: string,
-): string {
-  return `${baseUrl.trim()}${suffixSegment.trim()}`;
+/** Substitui placeholders nomeados na URL por {{1}} (uma única variável permitida pela Meta). */
+function urlNamedToMetaPositional(url: string): string {
+  return url.replace(/\{\{[a-z][a-z0-9_]*\}\}/g, "{{1}}");
+}
+
+/** Substitui {{2}},{{3}}… por {{1}} quando só um índice existe na URL (Meta). */
+function urlPositionalToMetaSingle(url: string, digit: string): string {
+  return url.replace(/\{\{\d+\}\}/g, `{{${digit}}}`);
 }
 
 /** Campos de exemplo exigidos pela Meta (corpo, cabeçalho, sufixo de URL dinâmica). */
@@ -237,7 +225,13 @@ export function getSampleFieldDescriptors(state: TemplateFormState): {
 }[] {
   const out: { sampleKey: string; hint: string }[] = [];
   const push = (k: string, h: string) => {
-    if (out.some((x) => x.sampleKey === k)) return;
+    const existing = out.find((x) => x.sampleKey === k);
+    if (existing) {
+      if (!existing.hint.includes(h)) {
+        existing.hint = `${existing.hint} · ${h}`;
+      }
+      return;
+    }
     out.push({ sampleKey: k, hint: h });
   };
   const pf = state.parameterFormat;
@@ -256,29 +250,40 @@ export function getSampleFieldDescriptors(state: TemplateFormState): {
       push(`header_p${n}`, `Cabeçalho {{${n}}}`);
     }
   }
+  const orderedBtns = orderButtonsForMeta(state.buttons);
+  for (const b of orderedBtns) {
+    if (b.kind !== "url") continue;
+    const u = normalizeUrlWithHttps(b.url);
+    if (pf === "named") {
+      for (const n of extractNamedPlaceholders(u)) {
+        push(n, `URL (botão): {{${n}}}`);
+      }
+    } else {
+      for (const n of extractPositionalPlaceholders(u)) {
+        push(`p${n}`, `URL (botão) {{${n}}}`);
+      }
+    }
+  }
   return out;
 }
 
 export function orderButtonsForMeta(buttons: DraftButton[]): DraftButton[] {
-  const nonQr = buttons.filter((b) => b.kind === "url" || b.kind === "phone");
+  const urls = buttons.filter((b) => b.kind === "url");
   const qr = buttons.filter((b) => b.kind === "quick_reply");
-  return [...nonQr, ...qr];
+  return [...urls, ...qr];
 }
 
-/** Limites oficiais: até 10 botões no total; até 2 URL, 1 telefone, 10 respostas rápidas. */
+/** Limites: até 10 botões no total (Meta); até 2 URL; até 3 respostas rápidas (produto). */
 export function canAddDraftButton(
   buttons: DraftButton[],
-  kind: "url" | "quick_reply" | "phone",
+  kind: "url" | "quick_reply",
 ): boolean {
   const ordered = orderButtonsForMeta(buttons);
   if (ordered.length >= BUTTONS_TOTAL_MAX) return false;
   if (kind === "url") {
     return buttons.filter((b) => b.kind === "url").length < 2;
   }
-  if (kind === "phone") {
-    return !buttons.some((b) => b.kind === "phone");
-  }
-  return buttons.filter((b) => b.kind === "quick_reply").length < 10;
+  return buttons.filter((b) => b.kind === "quick_reply").length < 3;
 }
 
 function normalizeButtonLabelKey(text: string): string {
@@ -442,10 +447,8 @@ function buildButtonsComponent(
   }
 
   let urlCount = 0;
-  let phoneCount = 0;
   let qrCount = 0;
   const built: unknown[] = [];
-  let urlOrdinal = 0;
   for (const b of ordered) {
     const label = b.text.trim();
     if (!label) {
@@ -462,61 +465,95 @@ function buildButtonsComponent(
         issues.push("No máximo 2 botões do tipo URL.");
         continue;
       }
-      if (b.mode === "static") {
-        const u = b.url.trim();
-        if (!u) {
-          issues.push("URL do botão não pode ficar vazia.");
-          continue;
-        }
-        if (u.length > URL_MAX) {
-          issues.push("URL do botão excede o limite.");
-          continue;
-        }
-        built.push({ type: "URL", text: label, url: u });
-      } else {
-        const base = b.baseUrl.trim();
-        if (!base) {
-          issues.push("URL base do botão dinâmico é obrigatória.");
-          continue;
-        }
-        const prefix = dynamicUrlStaticPrefix(b.baseUrl, b.suffixVariableLabel);
-        const sampleKey = urlSuffixSampleKey(urlOrdinal);
-        urlOrdinal++;
-        const suffix = (state.samples[sampleKey] ?? "").trim();
-        if (!suffix) {
+      const uRaw = normalizeUrlWithHttps(b.url);
+      if (uRaw === "https://" || uRaw === "https:") {
+        issues.push(`URL do botão «${label}» não pode ficar só com o esquema.`);
+        continue;
+      }
+      const pf = state.parameterFormat;
+      if (pf === "named") {
+        const hasPos = hasPositional(uRaw);
+        const hasNam = hasNamed(uRaw);
+        if (hasPos && hasNam) {
           issues.push(
-            `Informe o conteúdo de exemplo do sufixo da URL no botão «${label}».`,
+            `Botão «${label}»: na URL use só variáveis nomeadas ({{nome}}) ou só numéricas ({{1}}), não misture.`,
           );
           continue;
         }
-        const fullUrl = `${prefix}{{1}}`.slice(0, URL_MAX);
+        if (hasNam) {
+          const names = extractNamedPlaceholders(uRaw);
+          const uniq = [...new Set(names)];
+          if (uniq.length > 1) {
+            issues.push(
+              `Botão «${label}»: a URL só pode ter uma variável nomeada (a Meta usa um único {{1}}).`,
+            );
+            continue;
+          }
+          const param = uniq[0]!;
+          const ex = (state.samples[param] ?? "").trim();
+          if (!ex) {
+            issues.push(
+              `Informe o exemplo para {{${param}}} (usado no corpo/cabeçalho ou na URL do botão «${label}»).`,
+            );
+            continue;
+          }
+          const metaUrl = urlNamedToMetaPositional(uRaw).slice(0, URL_MAX);
+          built.push({
+            type: "URL",
+            text: label,
+            url: metaUrl,
+            example: [ex],
+          });
+          continue;
+        }
+        if (uRaw.length > URL_MAX) {
+          issues.push("URL do botão excede o limite.");
+          continue;
+        }
+        built.push({ type: "URL", text: label, url: uRaw });
+        continue;
+      }
+      if (hasNamed(uRaw)) {
+        issues.push(
+          `Botão «${label}»: com parâmetros posicionais no modelo, use {{1}} na URL, não {{nome}}.`,
+        );
+        continue;
+      }
+      const nums = extractPositionalPlaceholders(uRaw);
+      if (nums.length === 0) {
+        if (uRaw.length > URL_MAX) {
+          issues.push("URL do botão excede o limite.");
+          continue;
+        }
+        built.push({ type: "URL", text: label, url: uRaw });
+      } else {
+        const uniq = [...new Set(nums)];
+        if (uniq.length > 1) {
+          issues.push(
+            `Botão «${label}»: a URL só pode ter uma variável posicional ({{1}}).`,
+          );
+          continue;
+        }
+        const n = uniq[0]!;
+        const ex = (state.samples[`p${n}`] ?? "").trim();
+        if (!ex) {
+          issues.push(
+            `Informe o exemplo para {{${n}}} na URL do botão «${label}».`,
+          );
+          continue;
+        }
+        const metaUrl = urlPositionalToMetaSingle(uRaw, "1").slice(0, URL_MAX);
         built.push({
           type: "URL",
           text: label,
-          url: fullUrl,
-          example: [suffix],
+          url: metaUrl,
+          example: [ex],
         });
       }
-    } else if (b.kind === "phone") {
-      phoneCount++;
-      if (phoneCount > 1) {
-        issues.push("No máximo 1 botão de telefone.");
-        continue;
-      }
-      const phone = b.phone.replace(/\D/g, "").trim();
-      if (!phone) {
-        issues.push("Número do botão de telefone é obrigatório.");
-        continue;
-      }
-      if (phone.length > PHONE_BTN_MAX) {
-        issues.push("Número do telefone excede o limite permitido pela Meta.");
-        continue;
-      }
-      built.push({ type: "PHONE_NUMBER", text: label, phone_number: phone });
     } else {
       qrCount++;
-      if (qrCount > 10) {
-        issues.push("No máximo 10 respostas rápidas.");
+      if (qrCount > 3) {
+        issues.push("No máximo 3 respostas rápidas.");
         continue;
       }
       built.push({ type: "QUICK_REPLY", text: label });
@@ -597,50 +634,40 @@ export function componentsFromFormStateForPreview(state: TemplateFormState): unk
     out.push({ type: "FOOTER", text: state.footer.trim() });
   }
   if (state.buttonsEnabled && state.buttons.length) {
-    let dynUrlIdx = 0;
     const buttons = orderButtonsForMeta(state.buttons).map((b) => {
       if (b.kind === "url") {
-        if (b.mode === "static") {
-          return { type: "URL", text: b.text.trim(), url: b.url.trim() };
+        const u = normalizeUrlWithHttps(b.url);
+        if (state.parameterFormat === "named" && hasNamed(u)) {
+          const names = [...new Set(extractNamedPlaceholders(u))];
+          if (names.length === 1) {
+            const param = names[0]!;
+            const ex = (state.samples[param] ?? "").trim();
+            return {
+              type: "URL",
+              text: b.text.trim(),
+              url: ex ? u.replace(/\{\{([a-z][a-z0-9_]*)\}\}/g, () => ex) : u,
+            };
+          }
         }
-        const sk = urlSuffixSampleKey(dynUrlIdx);
-        dynUrlIdx++;
-        const suf = (state.samples[sk] ?? "").trim();
-        const prefix = dynamicUrlStaticPrefix(b.baseUrl, b.suffixVariableLabel);
-        return {
-          type: "URL",
-          text: b.text.trim(),
-          url: suf ? `${prefix}${suf}` : `${prefix}{{1}}`,
-        };
-      }
-      if (b.kind === "phone") {
-        return {
-          type: "PHONE_NUMBER",
-          text: b.text.trim(),
-          phone_number: b.phone.replace(/\D/g, ""),
-        };
+        if (state.parameterFormat === "positional" && extractPositionalPlaceholders(u).length) {
+          const nums = [...new Set(extractPositionalPlaceholders(u))];
+          if (nums.length === 1) {
+            const n = nums[0]!;
+            const ex = (state.samples[`p${n}`] ?? "").trim();
+            return {
+              type: "URL",
+              text: b.text.trim(),
+              url: ex ? u.replace(/\{\{\d+\}\}/g, ex) : u,
+            };
+          }
+        }
+        return { type: "URL", text: b.text.trim(), url: u };
       }
       return { type: "QUICK_REPLY", text: b.text.trim() };
     });
     out.push({ type: "BUTTONS", buttons });
   }
   return out;
-}
-
-/** Corrige índice url para sample keys — usado no form client. */
-export function urlDynamicSampleKeyForButton(
-  buttons: DraftButton[],
-  buttonId: string,
-): string {
-  const ordered = orderButtonsForMeta(buttons);
-  let u = 0;
-  for (const b of ordered) {
-    if (b.kind !== "url") continue;
-    if (b.mode !== "dynamic") continue;
-    if (b.id === buttonId) return urlSuffixSampleKey(u);
-    u++;
-  }
-  return urlSuffixSampleKey(0);
 }
 
 export function draftRowToMessageTemplateRecord(row: {
@@ -724,28 +751,9 @@ export function templateRecordToFormStateForDuplicate(
           ) {
             url = (urlVal as { base_url: string }).base_url;
           }
-          const dyn = /\{\{1\}\}\s*$/.test(url);
-          if (dyn) {
-            draftButtons.push({
-              id,
-              kind: "url",
-              text,
-              mode: "dynamic",
-              baseUrl: url.replace(/\{\{1\}\}\s*$/, ""),
-              suffixVariableLabel: "",
-            });
-          } else {
-            draftButtons.push({ id, kind: "url", text, mode: "static", url });
-          }
+          draftButtons.push({ id, kind: "url", text, url });
         } else if (bt === "QUICK_REPLY") {
           draftButtons.push({ id, kind: "quick_reply", text });
-        } else if (bt === "PHONE_NUMBER") {
-          draftButtons.push({
-            id,
-            kind: "phone",
-            text,
-            phone: String((btn as { phone_number?: string }).phone_number ?? ""),
-          });
         }
       }
     }

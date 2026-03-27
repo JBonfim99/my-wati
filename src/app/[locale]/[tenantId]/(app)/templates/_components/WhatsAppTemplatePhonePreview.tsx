@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import {
+  ArrowRight,
   Camera,
   ChevronLeft,
   ExternalLink,
@@ -230,18 +231,16 @@ export function WhatsAppTemplatePhonePreview({ model, businessName = "my-wati" }
                   data-testid="messageTemplate-addTemplateModal-preview-callAction-buttons"
                 >
                   {model.buttons.map((b, i) => {
-                    if (b.kind === "url" || b.kind === "phone") {
+                    const ctaShell =
+                      "preview-message__callAction-button flex cursor-default items-center justify-center gap-2 rounded-lg border border-[#D1D7DB] bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.04)]";
+                    if (b.kind === "url") {
                       return (
                         <div
                           key={`cta-${i}`}
-                          className="preview-message__callAction-button preview-message__callAction-button_url flex cursor-default items-center justify-center gap-2 rounded-lg border border-[#D1D7DB] bg-white px-3 py-2.5 text-center text-[14px] font-semibold leading-tight text-[#008069] shadow-[0_1px_0_rgba(0,0,0,0.04)]"
+                          className={`${ctaShell} preview-message__callAction-button_url text-center text-[14px] font-semibold leading-tight text-[#008069]`}
                           data-testid="messageTemplate-addTemplateModal-preview-calltoAction-button"
                         >
-                          {b.kind === "url" ? (
-                            <ExternalLink className="size-4 shrink-0 opacity-90" aria-hidden />
-                          ) : (
-                            <Phone className="size-4 shrink-0 opacity-90" aria-hidden />
-                          )}
+                          <ExternalLink className="size-4 shrink-0 opacity-90" aria-hidden />
                           <span className="min-w-0 truncate">{b.text}</span>
                         </div>
                       );
@@ -249,10 +248,18 @@ export function WhatsAppTemplatePhonePreview({ model, businessName = "my-wati" }
                     return (
                       <div
                         key={`qr-${i}`}
-                        className="preview-message__callAction-button preview-message__callAction-button_reply cursor-default rounded-lg border border-[#D1D7DB] bg-[#F5F6F6] px-3 py-2.5 text-center text-[14px] font-medium leading-tight text-[#111b21] shadow-[0_1px_0_rgba(0,0,0,0.03)]"
+                        className={`${ctaShell} preview-message__callAction-button_reply`}
                         data-testid="messageTemplate-addTemplateModal-preview-quickReply-button"
                       >
-                        {b.text}
+                        <ArrowRight className="size-4 shrink-0 text-[#008069] opacity-90" aria-hidden />
+                        <div className="flex min-w-0 flex-1 flex-col items-center gap-0.5 text-center">
+                          <span className="min-w-0 truncate text-[14px] font-semibold leading-tight text-[#008069]">
+                            {b.text}
+                          </span>
+                          <span className="text-[11px] font-medium leading-tight text-[#667781]">
+                            {t("view.previewQuickReplyCaption")}
+                          </span>
+                        </div>
                       </div>
                     );
                   })}
