@@ -125,6 +125,8 @@ export type MessageTemplateRecord = {
   previous_category?: string;
   rejected_reason?: { message?: string } | string;
   message_send_ttl_seconds?: number;
+  /** Unix timestamp (segundos), se a Meta devolver na listagem */
+  last_updated_time?: string;
 };
 
 const TEMPLATE_LIST_FIELDS = [
@@ -140,6 +142,202 @@ const TEMPLATE_LIST_FIELDS = [
   "rejected_reason",
   "message_send_ttl_seconds",
 ].join(",");
+
+const TEMPLATE_GET_FIELDS = [
+  "id",
+  "name",
+  "parameter_format",
+  "status",
+  "category",
+  "sub_category",
+  "language",
+  "components",
+  "rejected_reason",
+  "message_send_ttl_seconds",
+].join(",");
+
+function readGraphError(json: { error?: { message?: string } }): string {
+  return json.error?.message ?? "Graph API error";
+}
+
+/**
+ * GET /{message_template_id} — detalhe de um template (HSM).
+ */
+export async function fetchMessageTemplateById(
+  accessToken: string,
+  templateId: string,
+  graphVersion: string = DEFAULT_VERSION,
+): Promise<MessageTemplateRecord> {
+  const id = templateId.trim();
+  const url = `https://graph.facebook.com/${graphVersion}/${id}?fields=${encodeURIComponent(TEMPLATE_GET_FIELDS)}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const json = (await res.json()) as MessageTemplateRecord & {
+    error?: { message?: string };
+  };
+  if (!res.ok || json.error) {
+    throw new Error(readGraphError(json));
+  }
+  return json;
+}
+
+export type CreateTemplateResult =
+  | { ok: true; id: string; status?: string; category?: string }
+  | { ok: false; error: string; errorCode?: number };
+
+/**
+ * POST /{WABA_ID}/message_templates
+ */
+export async function createMessageTemplateOnWaba(
+  accessToken: string,
+  businessAccountId: string,
+  body: {
+    name: string;
+    language: string;
+    category: "UTILITY" | "MARKETING" | "AUTHENTICATION";
+    components: unknown[];
+    allow_category_change?: boolean;
+    parameter_format?: string;
+  },
+  graphVersion: string = DEFAULT_VERSION,
+): Promise<CreateTemplateResult> {
+  const waba = businessAccountId.trim();
+  const url = `https://graph.facebook.com/${graphVersion}/${waba}/message_templates`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: body.name.trim().toLowerCase(),
+      language: body.language.trim(),
+      category: body.category,
+      components: body.components,
+      ...(body.allow_category_change !== undefined
+        ? { allow_category_change: body.allow_category_change }
+        : { allow_category_change: true }),
+      ...(body.parameter_format?.trim()
+        ? { parameter_format: body.parameter_format.trim() }
+        : {}),
+    }),
+  });
+  const json = (await res.json()) as {
+    id?: string;
+    status?: string;
+    category?: string;
+    error?: { message?: string; code?: number };
+  };
+  if (!res.ok || json.error) {
+    return {
+      ok: false,
+      error: readGraphError(json),
+      errorCode: json.error?.code,
+    };
+  }
+  if (!json.id) return { ok: false, error: "Resposta sem id do template" };
+  return {
+    ok: true,
+    id: json.id,
+    status: json.status,
+    category: json.category,
+  };
+}
+
+export type SimpleMutationResult =
+  | { ok: true }
+  | { ok: false; error: string; errorCode?: number };
+
+/**
+ * DELETE /{WABA_ID}/message_templates?hsm_id={id}
+ */
+export async function deleteMessageTemplateFromWaba(
+  accessToken: string,
+  businessAccountId: string,
+  hsmId: string,
+  graphVersion: string = DEFAULT_VERSION,
+): Promise<SimpleMutationResult> {
+  const waba = businessAccountId.trim();
+  const hsm = hsmId.trim();
+  const q = new URLSearchParams({ hsm_id: hsm });
+  const url = `https://graph.facebook.com/${graphVersion}/${waba}/message_templates?${q}`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const json = (await res.json()) as {
+    success?: boolean;
+    error?: { message?: string; code?: number };
+  };
+  if (!res.ok || json.error) {
+    return {
+      ok: false,
+      error: readGraphError(json),
+      errorCode: json.error?.code,
+    };
+  }
+  if (json.success === false) {
+    return { ok: false, error: "Falha ao excluir template" };
+  }
+  return { ok: true };
+}
+
+export type UpdateTemplateResult =
+  | { ok: true; id?: string; name?: string; category?: string }
+  | { ok: false; error: string; errorCode?: number };
+
+/**
+ * POST /{message_template_id} — atualiza template (ex.: rascunho).
+ */
+export async function updateMessageTemplateById(
+  accessToken: string,
+  templateId: string,
+  body: {
+    components: unknown[];
+    category?: "UTILITY" | "MARKETING" | "AUTHENTICATION";
+    parameter_format?: string;
+  },
+  graphVersion: string = DEFAULT_VERSION,
+): Promise<UpdateTemplateResult> {
+  const id = templateId.trim();
+  const url = `https://graph.facebook.com/${graphVersion}/${id}`;
+  const payload: Record<string, unknown> = {
+    components: body.components,
+  };
+  if (body.category) payload.category = body.category;
+  if (body.parameter_format?.trim()) {
+    payload.parameter_format = body.parameter_format.trim();
+  }
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const json = (await res.json()) as {
+    success?: boolean;
+    id?: string;
+    name?: string;
+    category?: string;
+    error?: { message?: string; code?: number };
+  };
+  if (!res.ok || json.error) {
+    return {
+      ok: false,
+      error: readGraphError(json),
+      errorCode: json.error?.code,
+    };
+  }
+  return {
+    ok: true,
+    id: json.id,
+    name: json.name,
+    category: json.category,
+  };
+}
 
 /**
  * Lista todos os message templates do WABA, seguindo `paging.next` até acabar.

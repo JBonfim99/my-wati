@@ -4,6 +4,8 @@ import { getDb } from "@/lib/db";
 import { tenantMemberships } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 
+export { parseTenantIdFromParam } from "@/lib/tenant-id-param";
+
 export type MembershipRole = "admin" | "editor" | "support";
 
 export type SessionContext = {
@@ -39,14 +41,6 @@ export function normalizeTenantIdFromDb(raw: unknown): number | null {
     return null;
   }
   return null;
-}
-
-/** Segmento de URL: apenas inteiros positivos seguros em JS. */
-export function parseTenantIdFromParam(param: string): number | null {
-  if (!/^\d+$/.test(param)) return null;
-  const n = Number(param);
-  if (!Number.isSafeInteger(n) || n <= 0) return null;
-  return n;
 }
 
 export async function getSessionUser() {

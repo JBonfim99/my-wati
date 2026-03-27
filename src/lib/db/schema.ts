@@ -248,6 +248,28 @@ export const contactListMembers = pgTable(
   ],
 );
 
+/** Snapshot do formulário de criação de template WhatsApp (persistido no servidor). */
+export type MessageTemplateDraftPayload = Record<string, unknown>;
+
+export const messageTemplateDrafts = pgTable(
+  "message_template_drafts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: bigint("tenant_id", { mode: "number" })
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    payload: jsonb("payload").$type<MessageTemplateDraftPayload>().notNull(),
+    createdBy: uuid("created_by").references(() => profiles.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("message_template_drafts_tenant_idx").on(t.tenantId)],
+);
+
 export const campaigns = pgTable(
   "campaigns",
   {

@@ -1,11 +1,16 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getDb } from "@/lib/db";
 import { tenantMemberships } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { parseTenantIdFromParam } from "@/lib/session";
+import {
+  LAST_TENANT_COOKIE,
+  lastTenantCookieOptions,
+} from "@/lib/tenant-cookie";
 
 export async function setActiveTenant(formData: FormData) {
   const raw = formData.get("tenantId");
@@ -32,6 +37,9 @@ export async function setActiveTenant(formData: FormData) {
     .limit(1);
 
   if (!m) return;
+
+  const cookieStore = await cookies();
+  cookieStore.set(LAST_TENANT_COOKIE, String(tenantId), lastTenantCookieOptions);
 
   redirect(`/${tenantId}/dashboard`);
 }

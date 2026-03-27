@@ -33,7 +33,7 @@ export function AppShell({
   }, []);
 
   return (
-    <div className="flex min-h-screen flex-col bg-page lg:flex-row">
+    <div className="flex min-h-screen flex-col bg-page lg:h-screen lg:flex-row lg:overflow-hidden">
       <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-sidebar px-4 shadow-sm lg:hidden">
         <span className="font-display text-base font-bold tracking-tight text-fg">
           my-wati
@@ -79,8 +79,9 @@ export function AppShell({
         />
       </aside>
 
-      <main className="min-h-[calc(100dvh-3.5rem)] min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 lg:min-h-screen lg:px-8 lg:py-10">
-        <div className="mx-auto w-full max-w-7xl">{children}</div>
+      {/* overflow-x: clip evita barra horizontal sem quebrar position:sticky dos filhos (hidden+auto quebram sticky no Chrome). */}
+      <main className="min-h-[calc(100dvh-3.5rem)] min-w-0 flex-1 overflow-x-clip overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 lg:min-h-0 lg:px-8 lg:py-10">
+        <div className="mx-auto min-w-0 max-w-7xl">{children}</div>
       </main>
 
       <TenantSwitchOverlay

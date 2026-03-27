@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { getCachedTenantSession, parseTenantIdFromParam } from "@/lib/session";
@@ -24,9 +25,18 @@ export default async function NewCampaignPage({
     .where(eq(contactLists.tenantId, ctx.tenantId));
 
   return (
-    <NewCampaignForm
-      tenantId={String(ctx.tenantId)}
-      initialLists={lists}
-    />
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-lg space-y-6 p-6">
+          <div className="h-8 w-48 animate-pulse rounded bg-neutral-200" />
+          <div className="ds-card h-64 animate-pulse bg-neutral-50" />
+        </div>
+      }
+    >
+      <NewCampaignForm
+        tenantId={String(ctx.tenantId)}
+        initialLists={lists}
+      />
+    </Suspense>
   );
 }

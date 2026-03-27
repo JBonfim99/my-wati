@@ -2,6 +2,10 @@ import { type NextRequest, NextResponse } from "next/server";
 import createIntlMiddleware from "next-intl/middleware";
 import { routing } from "./i18n/routing";
 import { updateSession } from "./lib/supabase/middleware";
+import {
+  LAST_TENANT_COOKIE,
+  lastTenantCookieOptions,
+} from "./lib/tenant-cookie";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -25,6 +29,11 @@ export async function middleware(request: NextRequest) {
   sessionRes.headers.getSetCookie().forEach((cookie) => {
     intlRes.headers.append("Set-Cookie", cookie);
   });
+
+  const tenantSeg = path.match(/^\/(\d+)(?:\/|$)/);
+  if (tenantSeg) {
+    intlRes.cookies.set(LAST_TENANT_COOKIE, tenantSeg[1], lastTenantCookieOptions);
+  }
 
   return intlRes;
 }

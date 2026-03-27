@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import type { MessageTemplateRecord } from "@/lib/meta/graph";
@@ -8,7 +9,10 @@ import type { MessageTemplateRecord } from "@/lib/meta/graph";
 type ListRow = { id: number; name: string };
 
 function templateOptionValue(tpl: MessageTemplateRecord): string {
-  return JSON.stringify({ name: tpl.name, language: tpl.language });
+  return JSON.stringify({
+    name: (tpl.name ?? "").trim(),
+    language: (tpl.language ?? "").trim(),
+  });
 }
 
 function isApproved(tpl: MessageTemplateRecord): boolean {
@@ -27,6 +31,7 @@ type Props = {
 export function NewCampaignForm({ tenantId, initialLists }: Props) {
   const t = useTranslations("app.campaigns");
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [lists] = useState(initialLists);
   const [name, setName] = useState("");
@@ -66,10 +71,32 @@ export function NewCampaignForm({ tenantId, initialLists }: Props) {
         return (a.language ?? "").localeCompare(b.language ?? "", "pt-BR");
       });
       setApprovedTemplates(list);
-      setTemplateKey(list[0] ? templateOptionValue(list[0]) : "");
+      const raw = searchParams.get("template");
+      let preferred: string | null = null;
+      if (raw) {
+        try {
+          const decoded = JSON.parse(decodeURIComponent(raw)) as {
+            name?: string;
+            language?: string;
+          };
+          if (decoded.name?.trim() && decoded.language?.trim()) {
+            const want = JSON.stringify({
+              name: decoded.name.trim(),
+              language: decoded.language.trim(),
+            });
+            const match = list.find((tpl) => templateOptionValue(tpl) === want);
+            if (match) preferred = want;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      setTemplateKey(
+        preferred ?? (list[0] ? templateOptionValue(list[0]) : ""),
+      );
       setTemplatesLoading(false);
     })();
-  }, [tenantId]);
+  }, [tenantId, searchParams]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
