@@ -24,6 +24,8 @@ type Props = {
   isAdmin: boolean;
   tenants: TenantOption[];
   currentTenantId: string;
+  whatsappConnected: boolean;
+  onBeginTenantSwitch?: (tenantId: string) => void;
   onNavigate?: () => void;
 };
 
@@ -31,6 +33,8 @@ export function AppNav({
   isAdmin,
   tenants,
   currentTenantId,
+  whatsappConnected,
+  onBeginTenantSwitch,
   onNavigate,
 }: Props) {
   const t = useTranslations("app.nav");
@@ -108,6 +112,8 @@ export function AppNav({
       <TenantSelector
         tenants={tenants}
         currentTenantId={currentTenantId}
+        whatsappConnected={whatsappConnected}
+        onBeginTenantSwitch={onBeginTenantSwitch}
         onNavigate={onNavigate}
       />
 

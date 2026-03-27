@@ -498,11 +498,25 @@ export default function ContactsHub() {
         open={modal !== null}
         mode={modal?.mode ?? "create"}
         contact={modal?.mode === "edit" ? modal.contact : null}
-        allTags={data.allTags}
-        definitions={data.customFieldDefinitions}
+        allTags={data?.allTags ?? []}
+        definitions={data?.customFieldDefinitions ?? []}
         readOnly={readOnly}
         onClose={() => setModal(null)}
         onSaved={() => void load()}
+        onTagCreated={(tg) =>
+          setData((d) =>
+            d
+              ? {
+                  ...d,
+                  allTags: d.allTags.some((x) => x.id === tg.id)
+                    ? d.allTags
+                    : [...d.allTags, tg].sort((a, b) =>
+                        a.name.localeCompare(b.name),
+                      ),
+                }
+              : d,
+          )
+        }
       />
 
       {deleteId ? (

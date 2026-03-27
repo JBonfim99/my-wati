@@ -2,11 +2,13 @@ import { redirect } from "next/navigation";
 import { getCachedTenantSession, parseTenantIdFromParam } from "@/lib/session";
 import { getDb } from "@/lib/db";
 import {
+  countContacts,
   listContacts,
   listContactFieldDefs,
   listAllTags,
 } from "@/lib/contacts/queries";
 import { serializeContact, encodeCursor } from "@/lib/contacts/dto";
+import { CONTACTS_LIST_PAGE_SIZE } from "./_components/contacts-list-query";
 import { ContactsPageClient } from "./_components/ContactsPageClient";
 
 export default async function ContactsPage({
@@ -22,12 +24,17 @@ export default async function ContactsPage({
   if (!ctx) redirect("/select-tenant");
 
   const db = getDb();
-  const [{ contacts: rawContacts, nextCursor: rawCursor }, fieldDefs, allTags] =
-    await Promise.all([
-      listContacts(db, ctx.tenantId, { limit: 50 }),
-      listContactFieldDefs(db, ctx.tenantId),
-      listAllTags(db, ctx.tenantId),
-    ]);
+  const [
+    { contacts: rawContacts, nextCursor: rawCursor },
+    fieldDefs,
+    allTags,
+    initialTotal,
+  ] = await Promise.all([
+    listContacts(db, ctx.tenantId, { limit: CONTACTS_LIST_PAGE_SIZE }),
+    listContactFieldDefs(db, ctx.tenantId),
+    listAllTags(db, ctx.tenantId),
+    countContacts(db, ctx.tenantId, undefined),
+  ]);
 
   const initialContacts = rawContacts.map(serializeContact);
   const initialNextCursor = rawCursor
@@ -40,6 +47,7 @@ export default async function ContactsPage({
       role={ctx.role}
       initialContacts={initialContacts}
       initialNextCursor={initialNextCursor}
+      initialTotal={initialTotal}
       fieldDefs={fieldDefs}
       allTags={allTags}
     />

@@ -1,4 +1,15 @@
-import { and, asc, desc, eq, inArray, lt, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  lt,
+  or,
+} from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { AppDb } from "@/lib/db";
 import {
   contactCustomFieldDefinitions,
@@ -36,6 +47,32 @@ export type ContactRowDto = {
 
 export type ContactCursor = { updatedAt: string; id: string };
 
+export type {
+  ContactCustomFilterClause,
+  ContactListFilters,
+  ContactSystemFieldClause,
+  ContactSystemFieldOp,
+  ContactTagFilterClause,
+} from "./list-filters";
+import {
+  buildContactListFilterConditions,
+  type ContactListFilters,
+} from "./list-filters";
+
+/** Conta contatos com os mesmos filtros da listagem (sem cursor). */
+export async function countContacts(
+  db: AppDb,
+  tenantId: number,
+  filters: ContactListFilters | undefined,
+): Promise<number> {
+  const parts = buildContactListFilterConditions(db, tenantId, filters);
+  const [row] = await db
+    .select({ n: count() })
+    .from(contacts)
+    .where(and(...parts));
+  return Number(row?.n ?? 0);
+}
+
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
 /**
@@ -45,25 +82,34 @@ export type ContactCursor = { updatedAt: string; id: string };
 export async function listContacts(
   db: AppDb,
   tenantId: number,
-  opts: { limit: number; cursor?: ContactCursor },
+  opts: {
+    limit: number;
+    cursor?: ContactCursor;
+    filters?: ContactListFilters;
+  },
 ): Promise<{ contacts: ContactRowDto[]; nextCursor: ContactCursor | null }> {
-  const { limit, cursor } = opts;
+  const { limit, cursor, filters } = opts;
 
-  const tenantFilter = eq(contacts.tenantId, tenantId);
-  const cursorFilter = cursor
-    ? or(
+  const conditions: SQL[] = [
+    ...buildContactListFilterConditions(db, tenantId, filters),
+  ];
+
+  if (cursor) {
+    conditions.push(
+      or(
         lt(contacts.updatedAt, new Date(cursor.updatedAt)),
         and(
           eq(contacts.updatedAt, new Date(cursor.updatedAt)),
           lt(contacts.id, cursor.id),
         ),
-      )
-    : undefined;
+      )!,
+    );
+  }
 
   const rows = await db
     .select()
     .from(contacts)
-    .where(cursorFilter ? and(tenantFilter, cursorFilter) : tenantFilter)
+    .where(and(...conditions))
     .orderBy(desc(contacts.updatedAt), desc(contacts.id))
     .limit(limit + 1);
 
@@ -132,6 +178,31 @@ export async function listContacts(
 }
 
 /**
+ * Lista IDs de contatos que batem com os filtros (sem cursor), ordenados como a listagem.
+ * `maxIds` é o teto desejado; se houver mais linhas, `truncated` indica que a lista foi cortada.
+ */
+export async function listContactIdsForFilters(
+  db: AppDb,
+  tenantId: number,
+  filters: ContactListFilters | undefined,
+  maxIds: number,
+): Promise<{ ids: string[]; truncated: boolean }> {
+  const conditions: SQL[] = [
+    ...buildContactListFilterConditions(db, tenantId, filters),
+  ];
+  const limit = maxIds + 1;
+  const rows = await db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(and(...conditions))
+    .orderBy(desc(contacts.updatedAt), desc(contacts.id))
+    .limit(limit);
+  const truncated = rows.length > maxIds;
+  const slice = truncated ? rows.slice(0, maxIds) : rows;
+  return { ids: slice.map((r) => r.id), truncated };
+}
+
+/**
  * Fetches a single contact with its tags and custom values.
  * Use this after mutations — never load the full bundle to return one record.
  */
@@ -194,6 +265,51 @@ export async function listContactFieldDefs(
     .from(contactCustomFieldDefinitions)
     .where(eq(contactCustomFieldDefinitions.tenantId, tenantId))
     .orderBy(asc(contactCustomFieldDefinitions.sortOrder));
+}
+
+/** Página de definições com busca em rótulo ou chave técnica. */
+export async function listContactFieldDefsPage(
+  db: AppDb,
+  tenantId: number,
+  opts: { page: number; pageSize: number; q: string },
+): Promise<{ rows: ContactCustomFieldDefDto[]; total: number }> {
+  const { page, pageSize, q } = opts;
+  const offset = (page - 1) * pageSize;
+  const qTrim = q.trim();
+  const whereClause = qTrim
+    ? and(
+        eq(contactCustomFieldDefinitions.tenantId, tenantId),
+        or(
+          ilike(contactCustomFieldDefinitions.label, `%${qTrim}%`),
+          ilike(contactCustomFieldDefinitions.key, `%${qTrim}%`),
+        ),
+      )
+    : eq(contactCustomFieldDefinitions.tenantId, tenantId);
+
+  const [countRow] = await db
+    .select({ n: count() })
+    .from(contactCustomFieldDefinitions)
+    .where(whereClause);
+
+  const total = Number(countRow?.n ?? 0);
+
+  const rows = await db
+    .select({
+      id: contactCustomFieldDefinitions.id,
+      key: contactCustomFieldDefinitions.key,
+      label: contactCustomFieldDefinitions.label,
+      fieldType: contactCustomFieldDefinitions.fieldType,
+      config: contactCustomFieldDefinitions.config,
+      defaultValue: contactCustomFieldDefinitions.defaultValue,
+      sortOrder: contactCustomFieldDefinitions.sortOrder,
+    })
+    .from(contactCustomFieldDefinitions)
+    .where(whereClause)
+    .orderBy(asc(contactCustomFieldDefinitions.sortOrder))
+    .limit(pageSize)
+    .offset(offset);
+
+  return { rows, total };
 }
 
 /** All tags for a tenant, ordered by name. */

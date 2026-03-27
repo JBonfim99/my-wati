@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { BookUser, ListPlus, Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BookUser, CheckCircle2, ListPlus, Plus, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import type { SerializedContactDto } from "@/lib/contacts/dto";
@@ -9,42 +9,124 @@ import type {
   ContactCustomFieldDefDto,
   ContactTagDto,
 } from "@/lib/contacts/queries";
-import { ContactsTable } from "./ContactsTable";
+import { validateAndNormalizeCustomValue } from "@/lib/contacts/validate-custom-value";
+import type { FieldType } from "@/lib/contacts/validate-custom-value";
+import type { ContactCustomFieldConfig } from "@/lib/db/schema";
+import {
+  ContactsTable,
+  type ContactsTableSelection,
+  type ContactsTableSelectionScopeMenu,
+} from "./ContactsTable";
 import { FieldDefinitionsPanel } from "./FieldDefinitionsPanel";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { ContactsFilterShell } from "./ContactsFilterShell";
+import {
+  buildContactsFilterQueryString,
+  buildContactsListQuery,
+  CONTACTS_LIST_PAGE_SIZE,
+  emptyContactsListFilter,
+  hasMeaningfulFilters,
+  type ContactsListFilterState,
+} from "./contacts-list-query";
 import {
   ContactFormModal,
   type DefDto,
   type TagDto,
 } from "@/components/contacts/ContactFormModal";
+import { BulkCustomValueInput } from "./BulkCustomValueInput";
+import { BulkTagSearchField } from "./BulkTagSearchField";
 
 type Props = {
   tenantId: string;
   role: string;
   initialContacts: SerializedContactDto[];
   initialNextCursor: string | null;
+  initialTotal: number;
   fieldDefs: ContactCustomFieldDefDto[];
   allTags: ContactTagDto[];
 };
+
+type BulkExtraModal =
+  | null
+  | { kind: "add_tags" }
+  | { kind: "remove_tags" }
+  | { kind: "set_custom" }
+  | { kind: "clear_custom" };
 
 export function ContactsPageClient({
   tenantId,
   role,
   initialContacts,
   initialNextCursor,
+  initialTotal,
   fieldDefs: initialFieldDefs,
   allTags: initialAllTags,
 }: Props) {
   const t = useTranslations("app.contacts");
   const readOnly = role === "support";
   const api = `/api/t/${tenantId}/contacts`;
+  const bulkApi = `/api/t/${tenantId}/contacts/bulk`;
+  const idsApi = `/api/t/${tenantId}/contacts/ids`;
+  const exportApi = `/api/t/${tenantId}/contacts/export-csv`;
 
   const [tab, setTab] = useState<"contacts" | "fields">("contacts");
   const [contacts, setContacts] = useState(initialContacts);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [loadingMore, setLoadingMore] = useState(false);
   const [fieldDefs, setFieldDefs] = useState(initialFieldDefs);
+  const [fieldDefsRefresh, setFieldDefsRefresh] = useState(0);
   const [allTags, setAllTags] = useState(initialAllTags);
+
+  const [listFilters, setListFilters] = useState<ContactsListFilterState>(
+    () => emptyContactsListFilter(),
+  );
+  const [appliedFilters, setAppliedFilters] = useState<ContactsListFilterState>(
+    () => emptyContactsListFilter(),
+  );
+  const [listBusy, setListBusy] = useState(false);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [totalCount, setTotalCount] = useState(initialTotal);
+  const [organizationTotal, setOrganizationTotal] = useState(initialTotal);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [idsFetchLoading, setIdsFetchLoading] = useState(false);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
+  const [bulkSuccessMessage, setBulkSuccessMessage] = useState<string | null>(
+    null,
+  );
+  const bulkFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  const showBulkSuccess = useCallback((message: string) => {
+    if (bulkFeedbackTimerRef.current) {
+      clearTimeout(bulkFeedbackTimerRef.current);
+      bulkFeedbackTimerRef.current = null;
+    }
+    setBulkSuccessMessage(message);
+    bulkFeedbackTimerRef.current = setTimeout(() => {
+      setBulkSuccessMessage(null);
+      bulkFeedbackTimerRef.current = null;
+    }, 5500);
+  }, []);
+
+  const dismissBulkSuccess = useCallback(() => {
+    if (bulkFeedbackTimerRef.current) {
+      clearTimeout(bulkFeedbackTimerRef.current);
+      bulkFeedbackTimerRef.current = null;
+    }
+    setBulkSuccessMessage(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (bulkFeedbackTimerRef.current) {
+        clearTimeout(bulkFeedbackTimerRef.current);
+      }
+    };
+  }, []);
 
   const [modal, setModal] = useState<
     | { mode: "create" }
@@ -53,11 +135,119 @@ export function ContactsPageClient({
   >(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const [bulkExtra, setBulkExtra] = useState<BulkExtraModal>(null);
+  const [bulkTagPick, setBulkTagPick] = useState<Set<string>>(() => new Set());
+  const [bulkCustomFieldId, setBulkCustomFieldId] = useState("");
+  const [bulkCustomValueRaw, setBulkCustomValueRaw] = useState("");
+  const [bulkOpBusy, setBulkOpBusy] = useState(false);
+
+  const hasActiveFilters = useMemo(
+    () => hasMeaningfulFilters(appliedFilters),
+    [appliedFilters],
+  );
+
+  const sortedTagsForModal = useMemo(
+    () => [...allTags].sort((a, b) => a.name.localeCompare(b.name)),
+    [allTags],
+  );
+
+  const sortedFieldDefsForModal = useMemo(
+    () => [...fieldDefs].sort((a, b) => a.sortOrder - b.sortOrder),
+    [fieldDefs],
+  );
+
+  const bulkCustomSelectedDef = useMemo(
+    () => fieldDefs.find((d) => d.id === bulkCustomFieldId) ?? null,
+    [fieldDefs, bulkCustomFieldId],
+  );
+
+  const bulkSetCustomSubmitEnabled = useMemo(() => {
+    if (!bulkCustomSelectedDef) return false;
+    const v = validateAndNormalizeCustomValue(
+      bulkCustomSelectedDef.fieldType as FieldType,
+      bulkCustomValueRaw,
+      bulkCustomSelectedDef.config as ContactCustomFieldConfig | null,
+    );
+    return v.ok && v.value !== null && v.value !== undefined;
+  }, [bulkCustomSelectedDef, bulkCustomValueRaw]);
+
+  useEffect(() => {
+    if (bulkExtra?.kind === "set_custom") {
+      setBulkCustomValueRaw("");
+    }
+  }, [bulkCustomFieldId, bulkExtra?.kind]);
+
+  const applyListFromServer = useCallback(
+    async (f: ContactsListFilterState, cursor: string | null | undefined) => {
+      const qs = buildContactsListQuery(f, {
+        limit: CONTACTS_LIST_PAGE_SIZE,
+        includeTotal: !cursor,
+        ...(cursor ? { cursor } : {}),
+      });
+      const res = await fetch(`${api}?${qs}`);
+      if (!res.ok) return null;
+      const j = (await res.json()) as {
+        contacts: SerializedContactDto[];
+        nextCursor: string | null;
+        total?: number;
+      };
+      return j;
+    },
+    [api],
+  );
+
+  const refreshFirstPage = useCallback(async () => {
+    setListBusy(true);
+    const j = await applyListFromServer(appliedFilters, undefined);
+    setListBusy(false);
+    if (!j) return;
+    setContacts(j.contacts);
+    setNextCursor(j.nextCursor);
+    if (typeof j.total === "number") setTotalCount(j.total);
+  }, [applyListFromServer, appliedFilters]);
+
+  async function handleApplyFilters() {
+    setListBusy(true);
+    setSelectedIds(new Set());
+    setSelectionNotice(null);
+    const j = await applyListFromServer(listFilters, undefined);
+    setListBusy(false);
+    if (!j) return;
+    setContacts(j.contacts);
+    setNextCursor(j.nextCursor);
+    if (typeof j.total === "number") setTotalCount(j.total);
+    setAppliedFilters({ ...listFilters });
+  }
+
+  async function handleClearFilters() {
+    const e = emptyContactsListFilter();
+    setListFilters(e);
+    setListBusy(true);
+    setSelectedIds(new Set());
+    setSelectionNotice(null);
+    const j = await applyListFromServer(e, undefined);
+    setListBusy(false);
+    if (!j) return;
+    setContacts(j.contacts);
+    setNextCursor(j.nextCursor);
+    if (typeof j.total === "number") {
+      setTotalCount(j.total);
+      setOrganizationTotal(j.total);
+    }
+    setAppliedFilters(e);
+  }
 
   async function handleLoadMore() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
-    const res = await fetch(`${api}?cursor=${nextCursor}&limit=50`);
+    const qs = buildContactsListQuery(appliedFilters, {
+      limit: CONTACTS_LIST_PAGE_SIZE,
+      cursor: nextCursor,
+    });
+    const res = await fetch(`${api}?${qs}`);
     setLoadingMore(false);
     if (!res.ok) return;
     const j = (await res.json()) as {
@@ -68,15 +258,87 @@ export function ContactsPageClient({
     setNextCursor(j.nextCursor);
   }
 
+  async function fetchIdsAndSelect(f: ContactsListFilterState) {
+    setIdsFetchLoading(true);
+    setSelectionNotice(null);
+    const qs = buildContactsFilterQueryString(f);
+    const res = await fetch(`${idsApi}?${qs}`);
+    setIdsFetchLoading(false);
+    if (!res.ok) return;
+    const j = (await res.json()) as {
+      ids: string[];
+      truncated: boolean;
+      cap: number;
+    };
+    setSelectedIds(new Set(j.ids));
+    if (j.truncated) {
+      setSelectionNotice(
+        t("bulkSelectionTruncated", { cap: j.cap }),
+      );
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelectionNotice(null);
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  function toggleAllOnPage() {
+    setSelectionNotice(null);
+    const allSelected =
+      contacts.length > 0 &&
+      contacts.every((c) => selectedIds.has(c.id));
+    if (allSelected) {
+      setSelectedIds((prev) => {
+        const n = new Set(prev);
+        for (const c of contacts) n.delete(c.id);
+        return n;
+      });
+      return;
+    }
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      for (const c of contacts) n.add(c.id);
+      return n;
+    });
+  }
+
+  const selectionScopeMenu: ContactsTableSelectionScopeMenu | undefined =
+    readOnly
+      ? undefined
+      : {
+          hasActiveFilters,
+          filteredTotal: totalCount,
+          orgTotal: organizationTotal,
+          loading: idsFetchLoading,
+          onSelectFiltered: () => void fetchIdsAndSelect(appliedFilters),
+          onSelectAllOrg: () =>
+            void fetchIdsAndSelect(emptyContactsListFilter()),
+        };
+
+  const tableSelection: ContactsTableSelection | undefined = readOnly
+    ? undefined
+    : {
+        selectedIds,
+        onToggle: toggleSelected,
+        onToggleAllOnPage: toggleAllOnPage,
+      };
+
   function handleSaved(contact: SerializedContactDto) {
     if (modal?.mode === "create") {
       setContacts((prev) => [contact, ...prev]);
+      setTotalCount((n) => n + 1);
+      setOrganizationTotal((n) => n + 1);
     } else {
       setContacts((prev) =>
         prev.map((c) => (c.id === contact.id ? contact : c)),
       );
     }
-    // merge any new tags the server created into allTags
     setAllTags((prev) => {
       const existingIds = new Set(prev.map((tg) => tg.id));
       const newTags = contact.tags.filter((tg) => !existingIds.has(tg.id));
@@ -91,7 +353,172 @@ export function ContactsPageClient({
     setDeleteBusy(false);
     if (!res.ok) return;
     setContacts((prev) => prev.filter((c) => c.id !== deleteId));
+    setTotalCount((n) => Math.max(0, n - 1));
+    setOrganizationTotal((n) => Math.max(0, n - 1));
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      n.delete(deleteId);
+      return n;
+    });
     setDeleteId(null);
+  }
+
+  async function handleBulkDelete() {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    const res = await fetch(bulkApi, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ op: "delete", ids }),
+    });
+    setBulkBusy(false);
+    if (!res.ok) return;
+    const idSet = new Set(ids);
+    setContacts((prev) => prev.filter((c) => !idSet.has(c.id)));
+    setTotalCount((n) => Math.max(0, n - ids.length));
+    setOrganizationTotal((n) => Math.max(0, n - ids.length));
+    setSelectedIds(new Set());
+    setSelectionNotice(null);
+    setBulkDeleteOpen(false);
+    showBulkSuccess(t("bulkFeedbackDeleted"));
+  }
+
+  function openBulkAddTags() {
+    setBulkTagPick(new Set());
+    setBulkExtra({ kind: "add_tags" });
+  }
+
+  function openBulkRemoveTags() {
+    setBulkTagPick(new Set());
+    setBulkExtra({ kind: "remove_tags" });
+  }
+
+  function openBulkSetCustom() {
+    setBulkCustomFieldId(sortedFieldDefsForModal[0]?.id ?? "");
+    setBulkCustomValueRaw("");
+    setBulkExtra({ kind: "set_custom" });
+  }
+
+  function openBulkClearCustom() {
+    setBulkCustomFieldId(sortedFieldDefsForModal[0]?.id ?? "");
+    setBulkExtra({ kind: "clear_custom" });
+  }
+
+  function addBulkTagPick(id: string) {
+    setBulkTagPick((prev) => new Set(prev).add(id));
+  }
+
+  function removeBulkTagPick(id: string) {
+    setBulkTagPick((prev) => {
+      const n = new Set(prev);
+      n.delete(id);
+      return n;
+    });
+  }
+
+  async function handleBulkExportCsv() {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const res = await fetch(exportApi, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = `contatos-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(href);
+    showBulkSuccess(t("bulkFeedbackExportCsv"));
+  }
+
+  async function submitBulkExtra() {
+    const ids = [...selectedIds];
+    if (ids.length === 0 || !bulkExtra) return;
+
+    if (bulkExtra.kind === "add_tags" || bulkExtra.kind === "remove_tags") {
+      const tagIds = [...bulkTagPick];
+      if (tagIds.length === 0) return;
+      setBulkOpBusy(true);
+      const res = await fetch(bulkApi, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          bulkExtra.kind === "add_tags"
+            ? { op: "add_tags", ids, tagIds }
+            : { op: "remove_tags", ids, tagIds },
+        ),
+      });
+      setBulkOpBusy(false);
+      if (!res.ok) return;
+      setBulkExtra(null);
+      await refreshFirstPage();
+      setSelectedIds(new Set());
+      showBulkSuccess(
+        bulkExtra.kind === "add_tags"
+          ? t("bulkFeedbackTagsAdded")
+          : t("bulkFeedbackTagsRemoved"),
+      );
+      return;
+    }
+
+    if (bulkExtra.kind === "clear_custom") {
+      if (!bulkCustomFieldId) return;
+      setBulkOpBusy(true);
+      const res = await fetch(bulkApi, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "clear_custom_field",
+          ids,
+          fieldId: bulkCustomFieldId,
+        }),
+      });
+      setBulkOpBusy(false);
+      if (!res.ok) return;
+      setBulkExtra(null);
+      await refreshFirstPage();
+      setSelectedIds(new Set());
+      showBulkSuccess(t("bulkFeedbackCustomCleared"));
+      return;
+    }
+
+    if (bulkExtra.kind === "set_custom") {
+      if (!bulkCustomFieldId || !bulkCustomSelectedDef) return;
+      const normalized = validateAndNormalizeCustomValue(
+        bulkCustomSelectedDef.fieldType as FieldType,
+        bulkCustomValueRaw,
+        bulkCustomSelectedDef.config as ContactCustomFieldConfig | null,
+      );
+      if (
+        !normalized.ok ||
+        normalized.value === null ||
+        normalized.value === undefined
+      ) {
+        return;
+      }
+      setBulkOpBusy(true);
+      const res = await fetch(bulkApi, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "set_custom_field",
+          ids,
+          fieldId: bulkCustomFieldId,
+          value: normalized.value,
+        }),
+      });
+      setBulkOpBusy(false);
+      if (!res.ok) return;
+      setBulkExtra(null);
+      await refreshFirstPage();
+      setSelectedIds(new Set());
+      showBulkSuccess(t("bulkFeedbackCustomSet"));
+    }
   }
 
   async function reloadFieldDefs() {
@@ -99,7 +526,19 @@ export function ContactsPageClient({
     if (!res.ok) return;
     const j = (await res.json()) as { definitions: ContactCustomFieldDefDto[] };
     setFieldDefs(j.definitions);
+    setFieldDefsRefresh((n) => n + 1);
   }
+
+  const bulkExtraTitle =
+    bulkExtra?.kind === "add_tags"
+      ? t("bulkAddTagTitle")
+      : bulkExtra?.kind === "remove_tags"
+        ? t("bulkRemoveTagTitle")
+        : bulkExtra?.kind === "set_custom"
+          ? t("bulkSetCustomTitle")
+          : bulkExtra?.kind === "clear_custom"
+            ? t("bulkClearCustomTitle")
+            : "";
 
   return (
     <div className="space-y-8 pb-10">
@@ -176,18 +615,77 @@ export function ContactsPageClient({
 
       {tab === "contacts" ? (
         <>
+          <ContactsFilterShell
+            allTags={allTags}
+            fieldDefs={fieldDefs.map((d) => ({
+              id: d.id,
+              label: d.label,
+              fieldType: d.fieldType as FieldType,
+            }))}
+            value={listFilters}
+            onChange={setListFilters}
+            onApply={() => void handleApplyFilters()}
+            onClear={() => void handleClearFilters()}
+            applying={listBusy}
+            hasActiveFilters={hasActiveFilters}
+            panelOpen={filterPanelOpen}
+            onPanelOpenChange={setFilterPanelOpen}
+            selectedCount={selectedIds.size}
+            totalCount={totalCount}
+            readOnly={readOnly}
+            onBulkDeleteClick={() => setBulkDeleteOpen(true)}
+            onBulkAddTagClick={() => openBulkAddTags()}
+            onBulkRemoveTagClick={() => openBulkRemoveTags()}
+            onBulkSetCustomClick={() => openBulkSetCustom()}
+            onBulkClearCustomClick={() => openBulkClearCustom()}
+            onBulkExportCsvClick={() => void handleBulkExportCsv()}
+          />
+
+          {selectionNotice ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              {selectionNotice}
+            </p>
+          ) : null}
+
+          {bulkSuccessMessage ? (
+            <div
+              className="flex items-start gap-3 rounded-lg border border-emerald-300/90 bg-emerald-50 px-3 py-2.5 shadow-sm"
+              role="status"
+              aria-live="polite"
+            >
+              <CheckCircle2
+                className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+              <p className="min-w-0 flex-1 text-sm font-medium text-emerald-950">
+                {bulkSuccessMessage}
+              </p>
+              <button
+                type="button"
+                className="shrink-0 rounded-md p-1 text-emerald-800 hover:bg-emerald-100/80"
+                aria-label={t("bulkFeedbackDismiss")}
+                onClick={dismissBulkSuccess}
+              >
+                <X className="h-4 w-4" strokeWidth={2} aria-hidden />
+              </button>
+            </div>
+          ) : null}
+
           <ContactsTable
             contacts={contacts}
             readOnly={readOnly}
             onEdit={(c) => setModal({ mode: "edit", contact: c })}
             onDelete={(id) => setDeleteId(id)}
+            selection={tableSelection}
+            selectionScopeMenu={selectionScopeMenu}
           />
           {nextCursor ? (
             <div className="flex justify-center">
               <button
                 type="button"
                 className="ds-btn-outline"
-                disabled={loadingMore}
+                disabled={loadingMore || listBusy}
                 onClick={() => void handleLoadMore()}
               >
                 {loadingMore ? t("loading") : t("loadMore")}
@@ -198,8 +696,8 @@ export function ContactsPageClient({
       ) : (
         <FieldDefinitionsPanel
           tenantId={tenantId}
-          definitions={fieldDefs}
           readOnly={readOnly}
+          refreshTrigger={fieldDefsRefresh}
           onUpdated={() => void reloadFieldDefs()}
         />
       )}
@@ -214,6 +712,11 @@ export function ContactsPageClient({
         readOnly={readOnly}
         onClose={() => setModal(null)}
         onSaved={handleSaved}
+        onTagCreated={(tg) =>
+          setAllTags((prev) =>
+            prev.some((x) => x.id === tg.id) ? prev : [...prev, tg],
+          )
+        }
       />
 
       {deleteId ? (
@@ -226,6 +729,130 @@ export function ContactsPageClient({
           onConfirm={() => void handleDelete()}
           onCancel={() => setDeleteId(null)}
         />
+      ) : null}
+
+      {bulkDeleteOpen ? (
+        <DeleteConfirmDialog
+          title={t("bulkDeleteTitle")}
+          body={t("bulkDeleteBody", { count: selectedIds.size })}
+          confirmLabel={bulkBusy ? t("deleting") : t("deleteConfirm")}
+          cancelLabel={t("cancel")}
+          busy={bulkBusy}
+          onConfirm={() => void handleBulkDelete()}
+          onCancel={() => setBulkDeleteOpen(false)}
+        />
+      ) : null}
+
+      {bulkExtra ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-fg/30 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => !bulkOpBusy && setBulkExtra(null)}
+        >
+          <div
+            className="max-h-[min(90vh,520px)] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-display text-lg font-semibold text-fg">
+              {bulkExtraTitle}
+            </p>
+
+            {bulkExtra.kind === "add_tags" || bulkExtra.kind === "remove_tags" ? (
+              <>
+                <p className="mt-2 text-sm text-fg-secondary">
+                  {bulkExtra.kind === "add_tags"
+                    ? t("bulkAddTagHint")
+                    : t("bulkRemoveTagHint")}
+                </p>
+                {sortedTagsForModal.length === 0 ? (
+                  <p className="mt-4 text-sm text-fg-muted">
+                    {t("filterNoTagsInOrg")}
+                  </p>
+                ) : (
+                  <BulkTagSearchField
+                    key={bulkExtra.kind}
+                    tags={sortedTagsForModal}
+                    selectedIds={bulkTagPick}
+                    onAdd={addBulkTagPick}
+                    onRemove={removeBulkTagPick}
+                  />
+                )}
+              </>
+            ) : null}
+
+            {bulkExtra.kind === "set_custom" ||
+            bulkExtra.kind === "clear_custom" ? (
+              <>
+                <p className="mt-2 text-sm text-fg-secondary">
+                  {bulkExtra.kind === "set_custom"
+                    ? t("bulkSetCustomHint")
+                    : t("bulkClearCustomHint")}
+                </p>
+                <label className="mt-4 block text-sm font-medium text-fg">
+                  {t("bulkCustomFieldLabel")}
+                  <select
+                    className="ds-input mt-1 w-full"
+                    value={bulkCustomFieldId}
+                    onChange={(e) => setBulkCustomFieldId(e.target.value)}
+                  >
+                    {sortedFieldDefsForModal.length === 0 ? (
+                      <option value="">{t("filterCustomFieldEmptyOrg")}</option>
+                    ) : (
+                      sortedFieldDefsForModal.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+                {bulkExtra.kind === "set_custom" && bulkCustomSelectedDef ? (
+                  <label className="mt-3 block text-sm font-medium text-fg">
+                    {t("bulkCustomValueLabel")}
+                    <BulkCustomValueInput
+                      key={bulkCustomSelectedDef.id}
+                      definition={bulkCustomSelectedDef}
+                      value={bulkCustomValueRaw}
+                      onChange={setBulkCustomValueRaw}
+                    />
+                  </label>
+                ) : null}
+              </>
+            ) : null}
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className="ds-btn-outline"
+                disabled={bulkOpBusy}
+                onClick={() => setBulkExtra(null)}
+              >
+                {t("cancel")}
+              </button>
+              <button
+                type="button"
+                className="ds-btn-primary"
+                disabled={
+                  bulkOpBusy ||
+                  (bulkExtra.kind === "add_tags" ||
+                  bulkExtra.kind === "remove_tags"
+                    ? bulkTagPick.size === 0
+                    : false) ||
+                  (bulkExtra.kind === "set_custom" &&
+                    (sortedFieldDefsForModal.length === 0 ||
+                      !bulkCustomFieldId ||
+                      !bulkSetCustomSubmitEnabled)) ||
+                  (bulkExtra.kind === "clear_custom" &&
+                    (sortedFieldDefsForModal.length === 0 || !bulkCustomFieldId))
+                }
+                onClick={() => void submitBulkExtra()}
+              >
+                {bulkOpBusy ? t("bulkApplying") : t("bulkConfirm")}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

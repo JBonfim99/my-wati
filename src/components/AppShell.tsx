@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslations } from "next-intl";
 import { AppNav } from "@/components/AppNav";
 import type { TenantOption } from "@/components/TenantSelector";
+import { TenantSwitchOverlay } from "@/components/TenantSwitchOverlay";
 import { Menu, X } from "lucide-react";
 
 type Props = {
@@ -11,6 +12,7 @@ type Props = {
   isAdmin: boolean;
   tenantNav: { tenants: TenantOption[]; current: TenantOption | null };
   currentTenantId: string;
+  whatsappConnected: boolean;
 };
 
 export function AppShell({
@@ -18,9 +20,17 @@ export function AppShell({
   isAdmin,
   tenantNav,
   currentTenantId,
+  whatsappConnected,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [pendingTenantSwitch, setPendingTenantSwitch] = useState<string | null>(
+    null,
+  );
   const tShell = useTranslations("app.shell");
+
+  const endTenantSwitch = useCallback(() => {
+    setPendingTenantSwitch(null);
+  }, []);
 
   return (
     <div className="flex min-h-screen flex-col bg-page lg:flex-row">
@@ -63,6 +73,8 @@ export function AppShell({
           isAdmin={isAdmin}
           tenants={tenantNav.tenants}
           currentTenantId={currentTenantId}
+          whatsappConnected={whatsappConnected}
+          onBeginTenantSwitch={(id) => setPendingTenantSwitch(id)}
           onNavigate={() => setOpen(false)}
         />
       </aside>
@@ -70,6 +82,11 @@ export function AppShell({
       <main className="min-h-[calc(100dvh-3.5rem)] min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 lg:min-h-screen lg:px-8 lg:py-10">
         <div className="mx-auto w-full max-w-7xl">{children}</div>
       </main>
+
+      <TenantSwitchOverlay
+        pendingTenantId={pendingTenantSwitch}
+        onDone={endTenantSwitch}
+      />
     </div>
   );
 }

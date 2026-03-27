@@ -41,6 +41,10 @@
   --ease-app: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+:root {
+  --PhoneInput-color--focus: #4f46e5;
+}
+
 @layer base {
   html {
     @apply antialiased;
@@ -160,6 +164,16 @@
     @apply rounded-xl border border-danger/20 bg-danger-soft px-4 py-3 text-sm text-red-800;
   }
 
+  /* react-phone-number-input — número alinhado ao ds-input (bandeira usa estilo da lib) */
+  .phone-input-ds.PhoneInput {
+    @apply mt-1.5 gap-1;
+  }
+
+  .phone-input-ds .PhoneInputInput {
+    @apply h-10 min-h-10 rounded-lg border border-border-strong bg-card px-3 text-sm text-fg placeholder:text-fg-muted;
+    @apply focus-visible:border-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-100;
+  }
+
   /* Auth / marketing backdrop */
   .ds-auth-shell {
     background:
@@ -192,5 +206,12 @@
 
   .ds-animate-in {
     animation: ds-fade-up 0.45s var(--ease-app) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tenant-switch-overlay .animate-spin,
+  .tenant-switch-overlay .animate-pulse {
+    animation: none;
   }
 }

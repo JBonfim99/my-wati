@@ -162,6 +162,8 @@ export const contactTags = pgTable(
 
 export type ContactCustomFieldConfig = {
   options?: { value: string; label: string }[];
+  /** Texto auxiliar exibido na gestão de campos e no formulário de contato. */
+  description?: string;
 };
 
 export const contactCustomFieldDefinitions = pgTable(

@@ -6,6 +6,8 @@ import {
   getSessionUser,
   parseTenantIdFromParam,
 } from "@/lib/session";
+import { getDb } from "@/lib/db";
+import { hasActiveWhatsAppIntegration } from "@/lib/tenant-integration-status";
 import { getTenantNavOptions } from "@/lib/tenant-nav";
 
 export default async function TenantLayout({
@@ -33,13 +35,18 @@ export default async function TenantLayout({
   }
 
   const isAdmin = ctx.role === "admin";
-  const tenantNav = await getTenantNavOptions(ctx.userId, ctx.tenantId);
+  const db = getDb();
+  const [tenantNav, whatsappConnected] = await Promise.all([
+    getTenantNavOptions(ctx.userId, ctx.tenantId),
+    hasActiveWhatsAppIntegration(db, ctx.tenantId),
+  ]);
 
   return (
     <AppShell
       isAdmin={isAdmin}
       tenantNav={tenantNav}
       currentTenantId={String(ctx.tenantId)}
+      whatsappConnected={whatsappConnected}
     >
       {children}
     </AppShell>

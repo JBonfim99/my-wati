@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { getDb } from "@/lib/db";
 import type { ContactCustomFieldConfig } from "@/lib/db/schema";
 import { contactCustomFieldDefinitions } from "@/lib/db/schema";
@@ -9,6 +10,22 @@ import {
   validateAndNormalizeDefaultValue,
   type FieldType,
 } from "@/lib/contacts/validate-custom-value";
+
+const patchFieldDefSchema = z.object({
+  label: z.string().trim().min(1, "rótulo obrigatório").max(100).optional(),
+  description: z.union([z.string().max(2000), z.null()]).optional(),
+  config: z
+    .object({
+      options: z
+        .array(z.object({ value: z.string(), label: z.string() }))
+        .optional(),
+      description: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
+  sortOrder: z.number().int().optional(),
+  defaultValue: z.unknown().optional(),
+});
 
 type Ctx = { params: Promise<{ tenantId: string; id: string }> };
 
@@ -35,22 +52,46 @@ export async function PATCH(req: NextRequest, route: Ctx) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const body = (await req.json()) as {
-    label?: string;
-    config?: ContactCustomFieldConfig | null;
-    sortOrder?: number;
-    defaultValue?: unknown;
-  };
+  const parsed = patchFieldDefSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Dados inválidos" },
+      { status: 400 },
+    );
+  }
+  const body = parsed.data;
 
-  const cfg =
-    body.config !== undefined ? body.config : def.config;
+  let nextConfig: ContactCustomFieldConfig | null =
+    body.config !== undefined
+      ? body.config === null
+        ? null
+        : { ...body.config }
+      : def.config === null
+        ? null
+        : { ...(def.config ?? {}) };
+
+  if (nextConfig !== null && Object.keys(nextConfig).length === 0) {
+    nextConfig = null;
+  }
+
+  if (body.description !== undefined) {
+    const merged: ContactCustomFieldConfig = { ...(nextConfig ?? {}) };
+    if (body.description === null || body.description.trim() === "") {
+      delete merged.description;
+    } else {
+      merged.description = body.description.trim();
+    }
+    nextConfig = Object.keys(merged).length > 0 ? merged : null;
+  }
+
+  const cfgForValidation: ContactCustomFieldConfig | null = nextConfig;
 
   let nextDefault = def.defaultValue;
   if (body.defaultValue !== undefined) {
     const dv = validateAndNormalizeDefaultValue(
       def.fieldType as FieldType,
       body.defaultValue,
-      cfg,
+      cfgForValidation,
     );
     if (!dv.ok) {
       return NextResponse.json({ error: dv.error }, { status: 400 });
@@ -62,7 +103,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
     .update(contactCustomFieldDefinitions)
     .set({
       label: body.label?.trim() ?? def.label,
-      config: body.config !== undefined ? body.config : def.config,
+      config: nextConfig,
       sortOrder:
         body.sortOrder !== undefined ? body.sortOrder : def.sortOrder,
       defaultValue:

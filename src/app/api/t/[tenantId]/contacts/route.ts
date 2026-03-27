@@ -4,6 +4,12 @@ import { z } from "zod";
 import { normalizeE164 } from "@/lib/contacts/phone";
 import { slugify } from "@/lib/contacts/slug";
 import {
+  CONTACTS_PAGE_MAX,
+  CONTACTS_PAGE_SIZE,
+  parseContactListFiltersFromSearchParams,
+} from "@/lib/contacts/contact-list-request";
+import {
+  countContacts,
   listContacts,
   listContactFieldDefs,
   listAllTags,
@@ -26,8 +32,6 @@ import { canWriteContacts } from "@/lib/rbac";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
 
-const CONTACTS_PAGE_SIZE = 50;
-
 const createContactSchema = z.object({
   phone: z.string().min(1),
   name: z.string().nullable().optional(),
@@ -47,21 +51,48 @@ export async function GET(req: Request, route: RouteCtx) {
   const rawCursor = url.searchParams.get("cursor");
   const cursor = rawCursor ? decodeCursor(rawCursor) : undefined;
 
-  const [{ contacts: contactList, nextCursor }, fieldDefs, allTags] =
-    await Promise.all([
-      listContacts(db, ctx.tenantId, {
-        limit: CONTACTS_PAGE_SIZE,
-        cursor: cursor ?? undefined,
-      }),
-      listContactFieldDefs(db, ctx.tenantId),
-      listAllTags(db, ctx.tenantId),
-    ]);
+  const limitRaw = Number.parseInt(
+    url.searchParams.get("limit") ?? String(CONTACTS_PAGE_SIZE),
+    10,
+  );
+  const limit = Math.min(
+    CONTACTS_PAGE_MAX,
+    Math.max(1, Number.isNaN(limitRaw) ? CONTACTS_PAGE_SIZE : limitRaw),
+  );
+
+  const includeTotal = url.searchParams.get("total") === "1" && !cursor;
+
+  const [fieldDefs, allTags] = await Promise.all([
+    listContactFieldDefs(db, ctx.tenantId),
+    listAllTags(db, ctx.tenantId),
+  ]);
+
+  const parsedFilters = parseContactListFiltersFromSearchParams(
+    url.searchParams,
+    fieldDefs,
+  );
+  if (!parsedFilters.ok) return parsedFilters.response;
+  const filters = parsedFilters.filters;
+
+  const [listResult, totalCount] = await Promise.all([
+    listContacts(db, ctx.tenantId, {
+      limit,
+      cursor: cursor ?? undefined,
+      filters,
+    }),
+    includeTotal
+      ? countContacts(db, ctx.tenantId, filters)
+      : Promise.resolve(undefined as number | undefined),
+  ]);
+
+  const { contacts: contactList, nextCursor } = listResult;
 
   return NextResponse.json({
     contacts: contactList.map(serializeContact),
     nextCursor: nextCursor
       ? encodeCursor(nextCursor.updatedAt, nextCursor.id)
       : null,
+    ...(includeTotal && totalCount !== undefined ? { total: totalCount } : {}),
     customFieldDefinitions: fieldDefs,
     allTags,
     role: ctx.role,

@@ -4,7 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
-import { Pencil, Plus, Tags as TagsIcon, Trash2, X } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Pencil,
+  Plus,
+  Tags as TagsIcon,
+  Trash2,
+  X,
+} from "lucide-react";
 
 type TagRow = {
   id: string;
@@ -35,6 +43,7 @@ export default function TagsHub() {
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [copiedTagId, setCopiedTagId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(api);
@@ -115,6 +124,18 @@ export default function TagsHub() {
     if (!res.ok) return;
     setDeleteId(null);
     await load();
+  }
+
+  async function copyTagId(id: string) {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedTagId(id);
+      window.setTimeout(() => {
+        setCopiedTagId((cur) => (cur === id ? null : cur));
+      }, 2000);
+    } catch {
+      /* clipboard pode falhar fora de HTTPS ou sem permissão */
+    }
   }
 
   if (loading) {
@@ -200,7 +221,7 @@ export default function TagsHub() {
             <thead>
               <tr>
                 <th>{t("colName")}</th>
-                <th>{t("colSlug")}</th>
+                <th className="hidden lg:table-cell">{t("colId")}</th>
                 <th className="text-right">{t("colActions")}</th>
               </tr>
             </thead>
@@ -246,36 +267,58 @@ export default function TagsHub() {
                         row.name
                       )}
                     </td>
-                    <td className="font-mono text-[13px] text-fg-secondary">
-                      {row.slug}
+                    <td className="hidden max-w-[200px] font-mono text-[11px] text-fg-muted lg:table-cell">
+                      <span className="block truncate" title={row.id}>
+                        {row.id}
+                      </span>
                     </td>
                     <td className="text-right">
-                      {!readOnly ? (
-                        <div className="flex justify-end gap-1">
-                          <button
-                            type="button"
-                            className="ds-btn-ghost rounded-lg p-2"
-                            aria-label={t("edit")}
-                            onClick={() =>
-                              editingId === row.id
-                                ? cancelEdit()
-                                : startEdit(row)
-                            }
-                          >
-                            <Pencil className="h-4 w-4" strokeWidth={1.5} />
-                          </button>
-                          <button
-                            type="button"
-                            className="ds-btn-ghost rounded-lg p-2 text-danger hover:bg-danger-soft"
-                            aria-label={t("delete")}
-                            onClick={() => setDeleteId(row.id)}
-                          >
-                            <Trash2 className="h-4 w-4" strokeWidth={1.5} />
-                          </button>
-                        </div>
-                      ) : (
-                        "—"
-                      )}
+                      <div className="flex justify-end gap-1">
+                        <button
+                          type="button"
+                          className="ds-btn-ghost rounded-lg p-2"
+                          aria-label={t("copyTagIdAria")}
+                          title={
+                            copiedTagId === row.id
+                              ? t("tagIdCopied")
+                              : t("copyTagId")
+                          }
+                          onClick={() => void copyTagId(row.id)}
+                        >
+                          {copiedTagId === row.id ? (
+                            <Check
+                              className="h-4 w-4 text-emerald-600"
+                              strokeWidth={2}
+                            />
+                          ) : (
+                            <Copy className="h-4 w-4" strokeWidth={1.5} />
+                          )}
+                        </button>
+                        {!readOnly ? (
+                          <>
+                            <button
+                              type="button"
+                              className="ds-btn-ghost rounded-lg p-2"
+                              aria-label={t("edit")}
+                              onClick={() =>
+                                editingId === row.id
+                                  ? cancelEdit()
+                                  : startEdit(row)
+                              }
+                            >
+                              <Pencil className="h-4 w-4" strokeWidth={1.5} />
+                            </button>
+                            <button
+                              type="button"
+                              className="ds-btn-ghost rounded-lg p-2 text-danger hover:bg-danger-soft"
+                              aria-label={t("delete")}
+                              onClick={() => setDeleteId(row.id)}
+                            >
+                              <Trash2 className="h-4 w-4" strokeWidth={1.5} />
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -323,30 +366,52 @@ export default function TagsHub() {
               ) : (
                 <>
                   <div className="flex items-start justify-between gap-2">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="font-medium text-fg">{row.name}</p>
-                      <p className="mt-0.5 font-mono text-xs text-fg-muted">
-                        {row.slug}
+                      <p className="mt-1 truncate font-mono text-[10px] text-fg-muted/90">
+                        {t("colId")}: {row.id}
                       </p>
                     </div>
-                    {!readOnly ? (
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          className="ds-btn-ghost p-2"
-                          onClick={() => startEdit(row)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          className="ds-btn-ghost p-2 text-danger"
-                          onClick={() => setDeleteId(row.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ) : null}
+                    <div className="flex shrink-0 gap-1">
+                      <button
+                        type="button"
+                        className="ds-btn-ghost p-2"
+                        aria-label={t("copyTagIdAria")}
+                        title={
+                          copiedTagId === row.id
+                            ? t("tagIdCopied")
+                            : t("copyTagId")
+                        }
+                        onClick={() => void copyTagId(row.id)}
+                      >
+                        {copiedTagId === row.id ? (
+                          <Check
+                            className="h-4 w-4 text-emerald-600"
+                            strokeWidth={2}
+                          />
+                        ) : (
+                          <Copy className="h-4 w-4" strokeWidth={1.5} />
+                        )}
+                      </button>
+                      {!readOnly ? (
+                        <>
+                          <button
+                            type="button"
+                            className="ds-btn-ghost p-2"
+                            onClick={() => startEdit(row)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            className="ds-btn-ghost p-2 text-danger"
+                            onClick={() => setDeleteId(row.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                 </>
               )}
