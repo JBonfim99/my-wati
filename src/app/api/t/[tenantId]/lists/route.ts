@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
+import { z } from "zod";
 import { getDb } from "@/lib/db";
 import {
   contactListMembers,
@@ -10,6 +11,11 @@ import { requireTenantContext } from "@/lib/api-tenant-context";
 import { canWriteContacts } from "@/lib/rbac";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
+
+const createListSchema = z.object({
+  name: z.string().trim().min(1, "name required").max(200),
+  contactIds: z.array(z.string().uuid()).optional(),
+});
 
 export async function GET(_req: Request, route: RouteCtx) {
   const gate = await requireTenantContext((await route.params).tenantId);
@@ -30,26 +36,29 @@ export async function POST(req: NextRequest, route: RouteCtx) {
   if (!canWriteContacts(ctx)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  const body = (await req.json()) as { name?: string; contactIds?: string[] };
-  if (!body.name) {
-    return NextResponse.json({ error: "name required" }, { status: 400 });
+
+  const parsed = createListSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Dados inválidos" },
+      { status: 400 },
+    );
   }
+  const { name, contactIds } = parsed.data;
 
   const db = getDb();
   const [list] = await db
     .insert(contactLists)
-    .values({ tenantId: ctx.tenantId, name: body.name })
+    .values({ tenantId: ctx.tenantId, name })
     .returning();
 
-  if (body.contactIds?.length && list) {
+  if (contactIds?.length && list) {
     const valid = await db
       .select({ id: contacts.id })
       .from(contacts)
-      .where(
-        and(eq(contacts.tenantId, ctx.tenantId)),
-      );
+      .where(and(eq(contacts.tenantId, ctx.tenantId)));
     const allowed = new Set(valid.map((v) => v.id));
-    const rows = body.contactIds
+    const rows = contactIds
       .filter((id) => allowed.has(id))
       .map((contactId) => ({ listId: list.id, contactId }));
     if (rows.length) {

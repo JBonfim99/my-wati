@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, asc, eq } from "drizzle-orm";
+import { z } from "zod";
 import { slugify } from "@/lib/contacts/slug";
 import { getDb } from "@/lib/db";
 import { tags } from "@/lib/db/schema";
@@ -8,18 +9,17 @@ import { canWriteContacts } from "@/lib/rbac";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
 
+const createTagSchema = z.object({
+  name: z.string().trim().min(1, "Nome obrigatório").max(100),
+});
+
 export async function GET(_req: Request, route: RouteCtx) {
   const gate = await requireTenantContext((await route.params).tenantId);
   if (!gate.ok) return gate.response;
   const ctx = gate.ctx;
   const db = getDb();
   const rows = await db
-    .select({
-      id: tags.id,
-      name: tags.name,
-      slug: tags.slug,
-      createdAt: tags.createdAt,
-    })
+    .select({ id: tags.id, name: tags.name, slug: tags.slug, createdAt: tags.createdAt })
     .from(tags)
     .where(eq(tags.tenantId, ctx.tenantId))
     .orderBy(asc(tags.name));
@@ -42,13 +42,16 @@ export async function POST(req: NextRequest, route: RouteCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = (await req.json()) as { name?: string };
-  const name = body.name?.trim();
-  if (!name) {
-    return NextResponse.json({ error: "Nome obrigatório" }, { status: 400 });
+  const parsed = createTagSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Dados inválidos" },
+      { status: 400 },
+    );
   }
+  const { name } = parsed.data;
 
-  let key = slugify(name);
+  const key = slugify(name);
   const db = getDb();
   let n = 0;
   let candidate = key;
@@ -65,31 +68,15 @@ export async function POST(req: NextRequest, route: RouteCtx) {
 
   const [row] = await db
     .insert(tags)
-    .values({
-      tenantId: ctx.tenantId,
-      name,
-      slug: candidate,
-    })
-    .returning({
-      id: tags.id,
-      name: tags.name,
-      slug: tags.slug,
-      createdAt: tags.createdAt,
-    });
+    .values({ tenantId: ctx.tenantId, name, slug: candidate })
+    .returning({ id: tags.id, name: tags.name, slug: tags.slug, createdAt: tags.createdAt });
 
   if (!row) {
     return NextResponse.json({ error: "Erro ao criar" }, { status: 500 });
   }
 
   return NextResponse.json(
-    {
-      tag: {
-        id: row.id,
-        name: row.name,
-        slug: row.slug,
-        createdAt: row.createdAt.toISOString(),
-      },
-    },
+    { tag: { id: row.id, name: row.name, slug: row.slug, createdAt: row.createdAt.toISOString() } },
     { status: 201 },
   );
 }

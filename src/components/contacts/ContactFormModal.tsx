@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { X } from "lucide-react";
+import type { SerializedContactDto } from "@/lib/contacts/dto";
 
 export type TagDto = { id: string; name: string; slug: string };
 export type DefDto = {
@@ -14,14 +15,8 @@ export type DefDto = {
   defaultValue?: unknown;
 };
 
-export type ContactDto = {
-  id: string;
-  phoneE164: string;
-  name: string | null;
-  email: string | null;
-  tags: TagDto[];
-  customValues: Record<string, unknown>;
-};
+/** @deprecated Use SerializedContactDto from @/lib/contacts/dto */
+export type ContactDto = SerializedContactDto;
 
 function valueToFormString(value: unknown, fieldType: string): string {
   if (value === null || value === undefined) return "";
@@ -37,12 +32,12 @@ type Props = {
   tenantId: string;
   open: boolean;
   mode: "create" | "edit";
-  contact: ContactDto | null;
+  contact: SerializedContactDto | null;
   allTags: TagDto[];
   definitions: DefDto[];
   readOnly: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (contact: SerializedContactDto) => void;
 };
 
 export function ContactFormModal({
@@ -162,7 +157,8 @@ export function ContactFormModal({
       setErr(j.error ?? t("saveError"));
       return;
     }
-    onSaved();
+    const j = (await res.json()) as { contact: SerializedContactDto };
+    onSaved(j.contact);
     onClose();
   }
 

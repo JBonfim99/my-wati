@@ -9,6 +9,7 @@ export type AppDb = PostgresJsDatabase<typeof schema>;
 
 const globalForDb = globalThis as unknown as {
   queryClient?: postgres.Sql;
+  db?: AppDb;
 };
 
 function getConnectionString(): string {
@@ -20,11 +21,12 @@ function getConnectionString(): string {
 /**
  * Server / worker connection. Use `DATABASE_URL` with **service role** (bypasses RLS).
  * All queries MUST filter by `tenant_id` validated against the user's memberships in app code.
+ * Singleton: one connection pool per process regardless of environment.
  */
 export function getDb(): AppDb {
-  const client =
-    globalForDb.queryClient ??
-    postgres(getConnectionString(), { prepare: false, max: 15 });
-  if (process.env.NODE_ENV !== "production") globalForDb.queryClient = client;
-  return drizzle(client, { schema });
+  if (globalForDb.db) return globalForDb.db;
+  const client = postgres(getConnectionString(), { prepare: false, max: 15 });
+  globalForDb.queryClient = client;
+  globalForDb.db = drizzle(client, { schema });
+  return globalForDb.db;
 }

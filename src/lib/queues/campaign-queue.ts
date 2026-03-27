@@ -8,19 +8,22 @@ export type CampaignSendJob = {
   tenantId: number;
 };
 
-let connection: IORedis | null = null;
+const globalForQueue = globalThis as unknown as {
+  redisConnection?: IORedis;
+  campaignQueue?: Queue<CampaignSendJob>;
+};
 
 function getRedis(): IORedis {
+  if (globalForQueue.redisConnection) return globalForQueue.redisConnection;
   const url = process.env.REDIS_URL;
   if (!url) throw new Error("REDIS_URL is not set");
-  if (!connection) {
-    connection = new IORedis(url, { maxRetriesPerRequest: null });
-  }
-  return connection;
+  globalForQueue.redisConnection = new IORedis(url, { maxRetriesPerRequest: null });
+  return globalForQueue.redisConnection;
 }
 
-export function getCampaignQueue() {
-  return new Queue<CampaignSendJob>(CAMPAIGN_QUEUE_NAME, {
+export function getCampaignQueue(): Queue<CampaignSendJob> {
+  if (globalForQueue.campaignQueue) return globalForQueue.campaignQueue;
+  globalForQueue.campaignQueue = new Queue<CampaignSendJob>(CAMPAIGN_QUEUE_NAME, {
     connection: getRedis(),
     defaultJobOptions: {
       attempts: 5,
@@ -29,4 +32,5 @@ export function getCampaignQueue() {
       removeOnFail: 5000,
     },
   });
+  return globalForQueue.campaignQueue;
 }

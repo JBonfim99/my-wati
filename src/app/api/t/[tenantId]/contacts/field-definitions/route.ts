@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, asc, eq } from "drizzle-orm";
+import { z } from "zod";
 import { slugify } from "@/lib/contacts/slug";
 import type { CustomFieldType } from "@/lib/contacts/system-fields";
 import {
@@ -14,7 +15,23 @@ import { canWriteContacts } from "@/lib/rbac";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
 
-const TYPES: CustomFieldType[] = ["text", "number", "boolean", "date"];
+const FIELD_TYPES = ["text", "number", "boolean", "date"] as const;
+
+const createFieldDefSchema = z.object({
+  label: z.string().trim().min(1, "label obrigatório").max(100),
+  key: z.string().trim().optional(),
+  fieldType: z.enum(FIELD_TYPES, { error: "fieldType inválido" }),
+  config: z
+    .object({
+      options: z
+        .array(z.object({ value: z.string(), label: z.string() }))
+        .optional(),
+    })
+    .nullable()
+    .optional(),
+  sortOrder: z.number().int().optional(),
+  defaultValue: z.unknown().optional(),
+});
 
 export async function GET(_req: Request, route: RouteCtx) {
   const gate = await requireTenantContext((await route.params).tenantId);
@@ -37,24 +54,17 @@ export async function POST(req: NextRequest, route: RouteCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = (await req.json()) as {
-    label?: string;
-    key?: string;
-    fieldType?: string;
-    config?: ContactCustomFieldConfig | null;
-    sortOrder?: number;
-    defaultValue?: unknown;
-  };
-
-  if (!body.label?.trim()) {
-    return NextResponse.json({ error: "label obrigatório" }, { status: 400 });
+  const parsed = createFieldDefSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Dados inválidos" },
+      { status: 400 },
+    );
   }
+  const body = parsed.data;
   const fieldType = body.fieldType as CustomFieldType;
-  if (!fieldType || !TYPES.includes(fieldType)) {
-    return NextResponse.json({ error: "fieldType inválido" }, { status: 400 });
-  }
+  const cfg = (body.config ?? null) as ContactCustomFieldConfig | null;
 
-  const cfg = body.config ?? null;
   const dv = validateAndNormalizeDefaultValue(
     fieldType as FieldType,
     body.defaultValue,

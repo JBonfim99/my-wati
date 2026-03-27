@@ -28,9 +28,7 @@ export async function GET(_req: Request, route: RouteCtx) {
       and(eq(campaigns.tenantId, ctx.tenantId), eq(campaigns.status, "sending")),
     );
 
-  for (const row of maybeStuck) {
-    await syncCampaignFinishedStatus(row.id);
-  }
+  await Promise.all(maybeStuck.map((row) => syncCampaignFinishedStatus(row.id)));
 
   const rows = await db
     .select()

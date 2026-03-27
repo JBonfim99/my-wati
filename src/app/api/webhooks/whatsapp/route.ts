@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   campaignRecipients,
@@ -41,6 +41,13 @@ function verifySignature(rawBody: string, signature: string | null, secret: stri
   }
 }
 
+const STATUS_MAP: Record<string, "sent" | "delivered" | "read" | "failed"> = {
+  sent: "sent",
+  delivered: "delivered",
+  read: "read",
+  failed: "failed",
+};
+
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const signature = req.headers.get("x-hub-signature-256");
@@ -76,35 +83,50 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const statuses =
-    body.entry?.[0]?.changes?.[0]?.value?.statuses ?? [];
+  const statuses = body.entry?.[0]?.changes?.[0]?.value?.statuses ?? [];
+
+  // Group updates by (status, hasError) to batch DB writes where possible.
+  // Most webhooks arrive with one status at a time, but batching is correct
+  // for multi-status payloads and avoids sequential await-in-loop.
+  type StatusUpdate = { wamid: string; status: "sent" | "delivered" | "read" | "failed"; errors?: unknown[] };
+  const updates: StatusUpdate[] = [];
+
   for (const item of statuses) {
     const wamid = item.id;
-    const status = item.status;
     if (!wamid) continue;
-
-    const map: Record<string, "sent" | "delivered" | "read" | "failed"> = {
-      sent: "sent",
-      delivered: "delivered",
-      read: "read",
-      failed: "failed",
-    };
-    const key = status ?? "";
-    const next = map[key];
+    const next = STATUS_MAP[item.status ?? ""];
     if (!next) continue;
-
-    await db
-      .update(campaignRecipients)
-      .set({
-        status: next,
-        lastError:
-          item.status === "failed"
-            ? JSON.stringify(item.errors ?? [])
-            : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(campaignRecipients.wamid, wamid));
+    updates.push({ wamid, status: next, errors: item.errors });
   }
+
+  if (updates.length === 0) {
+    return NextResponse.json({ ok: true });
+  }
+
+  // Batch: group by (status, errorJson) to minimize DB round-trips
+  type GroupKey = string;
+  const groups = new Map<
+    GroupKey,
+    { status: "sent" | "delivered" | "read" | "failed"; lastError: string | null; wamids: string[] }
+  >();
+
+  for (const u of updates) {
+    const lastError =
+      u.status === "failed" ? JSON.stringify(u.errors ?? []) : null;
+    const key: GroupKey = `${u.status}::${lastError ?? ""}`;
+    const group = groups.get(key) ?? { status: u.status, lastError, wamids: [] };
+    group.wamids.push(u.wamid);
+    groups.set(key, group);
+  }
+
+  await Promise.all(
+    [...groups.values()].map(({ status, lastError, wamids }) =>
+      db
+        .update(campaignRecipients)
+        .set({ status, lastError, updatedAt: new Date() })
+        .where(inArray(campaignRecipients.wamid, wamids)),
+    ),
+  );
 
   return NextResponse.json({ ok: true });
 }

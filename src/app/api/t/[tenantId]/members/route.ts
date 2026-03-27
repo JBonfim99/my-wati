@@ -213,6 +213,15 @@ export async function POST(req: NextRequest, route: RouteCtx) {
   return NextResponse.json({ ok: true, userId }, { status: 201 });
 }
 
+const patchMemberSchema = z.object({
+  userId: z.string().uuid(),
+  role: z.enum(["admin", "editor", "support"]),
+});
+
+const deleteMemberSchema = z.object({
+  userId: z.string().uuid(),
+});
+
 export async function PATCH(req: NextRequest, route: RouteCtx) {
   const gate = await requireTenantContext((await route.params).tenantId);
   if (!gate.ok) return gate.response;
@@ -221,13 +230,11 @@ export async function PATCH(req: NextRequest, route: RouteCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = (await req.json()) as {
-    userId?: string;
-    role?: "admin" | "editor" | "support";
-  };
-  if (!body.userId || !body.role) {
-    return NextResponse.json({ error: "userId, role required" }, { status: 400 });
+  const parsed = patchMemberSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json({ error: "userId e role obrigatórios e válidos" }, { status: 400 });
   }
+  const body = parsed.data;
 
   const db = getDb();
   const currentRole = await getMembershipRole(db, ctx.tenantId, body.userId);
@@ -271,10 +278,11 @@ export async function DELETE(req: NextRequest, route: RouteCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = (await req.json()) as { userId?: string };
-  if (!body.userId) {
-    return NextResponse.json({ error: "userId required" }, { status: 400 });
+  const parsed = deleteMemberSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json({ error: "userId obrigatório e válido" }, { status: 400 });
   }
+  const body = parsed.data;
 
   const db = getDb();
   const currentRole = await getMembershipRole(db, ctx.tenantId, body.userId);

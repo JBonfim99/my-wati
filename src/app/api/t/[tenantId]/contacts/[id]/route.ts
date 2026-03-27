@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { normalizeE164 } from "@/lib/contacts/phone";
 import { slugify } from "@/lib/contacts/slug";
-import { getContactForTenant, loadContactsBundle } from "@/lib/contacts/load-bundle";
+import {
+  getContactWithDetails,
+  listContactFieldDefs,
+  listAllTags,
+} from "@/lib/contacts/queries";
+import { serializeContact } from "@/lib/contacts/dto";
 import { sameNormalizedCustomValue } from "@/lib/contacts/same-normalized-custom-value";
 import { validateAndNormalizeCustomValue } from "@/lib/contacts/validate-custom-value";
 import type { FieldType } from "@/lib/contacts/validate-custom-value";
+import type { ContactCustomFieldConfig } from "@/lib/db/schema";
 import { getDb } from "@/lib/db";
 import {
-  contactCustomFieldDefinitions,
   contactCustomValues,
   contactTags,
   contacts,
@@ -19,19 +25,14 @@ import { canWriteContacts } from "@/lib/rbac";
 
 type Ctx = { params: Promise<{ tenantId: string; id: string }> };
 
-function serializeContact(c: Awaited<ReturnType<typeof loadContactsBundle>>["contacts"][0]) {
-  return {
-    id: c.id,
-    tenantId: c.tenantId,
-    phoneE164: c.phoneE164,
-    name: c.name,
-    email: c.email,
-    createdAt: c.createdAt.toISOString(),
-    updatedAt: c.updatedAt.toISOString(),
-    tags: c.tags,
-    customValues: c.customValues,
-  };
-}
+const patchContactSchema = z.object({
+  phone: z.string().optional(),
+  name: z.string().nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  tagIds: z.array(z.string().uuid()).optional(),
+  newTagNames: z.array(z.string()).optional(),
+  customValues: z.record(z.string(), z.unknown()).optional(),
+});
 
 export async function GET(_req: NextRequest, route: Ctx) {
   const { tenantId: tp, id } = await route.params;
@@ -39,15 +40,21 @@ export async function GET(_req: NextRequest, route: Ctx) {
   if (!gate.ok) return gate.response;
   const session = gate.ctx;
   const db = getDb();
-  const bundle = await loadContactsBundle(db, session.tenantId);
-  const c = bundle.contacts.find((x) => x.id === id);
-  if (!c) {
+
+  const [contact, fieldDefs, allTags] = await Promise.all([
+    getContactWithDetails(db, session.tenantId, id),
+    listContactFieldDefs(db, session.tenantId),
+    listAllTags(db, session.tenantId),
+  ]);
+
+  if (!contact) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
   return NextResponse.json({
-    contact: serializeContact(c),
-    customFieldDefinitions: bundle.customFieldDefinitions,
-    allTags: bundle.allTags,
+    contact: serializeContact(contact),
+    customFieldDefinitions: fieldDefs,
+    allTags,
   });
 }
 
@@ -59,30 +66,31 @@ export async function PATCH(req: NextRequest, route: Ctx) {
   if (!canWriteContacts(session)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  const parsed = patchContactSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    const msg = parsed.error.issues[0]?.message ?? "Dados inválidos";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+  const body = parsed.data;
+
   const db = getDb();
-  const existing = await getContactForTenant(db, session.tenantId, id);
+
+  // Load existing contact + field defs before the transaction
+  const [existing, allDefs] = await Promise.all([
+    getContactWithDetails(db, session.tenantId, id),
+    listContactFieldDefs(db, session.tenantId),
+  ]);
+
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const body = (await req.json()) as {
-    phone?: string;
-    name?: string | null;
-    email?: string | null;
-    tagIds?: string[];
-    newTagNames?: string[];
-    customValues?: Record<string, unknown>;
-  };
-
-  const defs = await db
-    .select()
-    .from(contactCustomFieldDefinitions)
-    .where(eq(contactCustomFieldDefinitions.tenantId, session.tenantId));
-
+  // Validate and normalize custom values
   const normalizedCustom: { fieldId: string; value: unknown }[] = [];
   if (body.customValues) {
     for (const [fieldId, raw] of Object.entries(body.customValues)) {
-      const def = defs.find((d) => d.id === fieldId);
+      const def = allDefs.find((d) => d.id === fieldId);
       if (!def) {
         return NextResponse.json(
           { error: `Campo desconhecido: ${fieldId}` },
@@ -92,7 +100,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
       const v = validateAndNormalizeCustomValue(
         def.fieldType as FieldType,
         raw,
-        def.config,
+        def.config as ContactCustomFieldConfig | null,
       );
       if (!v.ok) {
         return NextResponse.json({ error: v.error }, { status: 400 });
@@ -101,6 +109,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
     }
   }
 
+  // Phone uniqueness check
   let nextPhone = existing.phoneE164;
   if (body.phone !== undefined) {
     const p = normalizeE164(body.phone);
@@ -134,9 +143,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
       .set({
         phoneE164: nextPhone,
         name:
-          body.name !== undefined
-            ? body.name?.trim() || null
-            : existing.name,
+          body.name !== undefined ? body.name?.trim() || null : existing.name,
         email:
           body.email !== undefined
             ? body.email?.trim() || null
@@ -180,7 +187,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
     }
 
     for (const { fieldId, value } of normalizedCustom) {
-      const def = defs.find((d) => d.id === fieldId);
+      const def = allDefs.find((d) => d.id === fieldId);
       const redundant =
         value === null ||
         value === undefined ||
@@ -189,40 +196,30 @@ export async function PATCH(req: NextRequest, route: Ctx) {
             def.fieldType as FieldType,
             value,
             def.defaultValue,
-            def.config,
+            def.config as ContactCustomFieldConfig | null,
           ));
       if (redundant) {
-        await tx
-          .delete(contactCustomValues)
-          .where(
-            and(
-              eq(contactCustomValues.contactId, id),
-              eq(contactCustomValues.fieldId, fieldId),
-            ),
-          );
+        await tx.delete(contactCustomValues).where(
+          and(
+            eq(contactCustomValues.contactId, id),
+            eq(contactCustomValues.fieldId, fieldId),
+          ),
+        );
       } else {
         await tx
           .insert(contactCustomValues)
-          .values({
-            contactId: id,
-            fieldId,
-            value,
-            updatedAt: new Date(),
-          })
+          .values({ contactId: id, fieldId, value, updatedAt: new Date() })
           .onConflictDoUpdate({
-            target: [
-              contactCustomValues.contactId,
-              contactCustomValues.fieldId,
-            ],
+            target: [contactCustomValues.contactId, contactCustomValues.fieldId],
             set: { value, updatedAt: new Date() },
           });
       }
     }
   });
 
-  const bundle = await loadContactsBundle(db, session.tenantId);
-  const c = bundle.contacts.find((x) => x.id === id);
-  return NextResponse.json({ contact: c ? serializeContact(c) : null });
+  // Return only the updated contact — no full-bundle reload.
+  const updated = await getContactWithDetails(db, session.tenantId, id);
+  return NextResponse.json({ contact: updated ? serializeContact(updated) : null });
 }
 
 export async function DELETE(_req: NextRequest, route: Ctx) {
@@ -234,7 +231,7 @@ export async function DELETE(_req: NextRequest, route: Ctx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const db = getDb();
-  const existing = await getContactForTenant(db, session.tenantId, id);
+  const existing = await getContactWithDetails(db, session.tenantId, id);
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

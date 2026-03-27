@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { normalizeE164 } from "@/lib/contacts/phone";
 import { slugify } from "@/lib/contacts/slug";
-import { loadContactsBundle } from "@/lib/contacts/load-bundle";
+import {
+  listContacts,
+  listContactFieldDefs,
+  listAllTags,
+  getContactWithDetails,
+} from "@/lib/contacts/queries";
+import { serializeContact, decodeCursor, encodeCursor } from "@/lib/contacts/dto";
 import { sameNormalizedCustomValue } from "@/lib/contacts/same-normalized-custom-value";
 import { validateAndNormalizeCustomValue } from "@/lib/contacts/validate-custom-value";
 import type { FieldType } from "@/lib/contacts/validate-custom-value";
@@ -19,40 +26,44 @@ import { canWriteContacts } from "@/lib/rbac";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
 
-function serializeContact(c: {
-  id: string;
-  tenantId: number;
-  phoneE164: string;
-  name: string | null;
-  email: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  tags: { id: string; name: string; slug: string }[];
-  customValues: Record<string, unknown>;
-}) {
-  return {
-    id: c.id,
-    tenantId: c.tenantId,
-    phoneE164: c.phoneE164,
-    name: c.name,
-    email: c.email,
-    createdAt: c.createdAt.toISOString(),
-    updatedAt: c.updatedAt.toISOString(),
-    tags: c.tags,
-    customValues: c.customValues,
-  };
-}
+const CONTACTS_PAGE_SIZE = 50;
 
-export async function GET(_req: Request, route: RouteCtx) {
+const createContactSchema = z.object({
+  phone: z.string().min(1),
+  name: z.string().nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  tagIds: z.array(z.string().uuid()).optional(),
+  newTagNames: z.array(z.string()).optional(),
+  customValues: z.record(z.string(), z.unknown()).optional(),
+});
+
+export async function GET(req: Request, route: RouteCtx) {
   const gate = await requireTenantContext((await route.params).tenantId);
   if (!gate.ok) return gate.response;
   const ctx = gate.ctx;
   const db = getDb();
-  const bundle = await loadContactsBundle(db, ctx.tenantId);
+
+  const url = new URL((req as NextRequest).url);
+  const rawCursor = url.searchParams.get("cursor");
+  const cursor = rawCursor ? decodeCursor(rawCursor) : undefined;
+
+  const [{ contacts: contactList, nextCursor }, fieldDefs, allTags] =
+    await Promise.all([
+      listContacts(db, ctx.tenantId, {
+        limit: CONTACTS_PAGE_SIZE,
+        cursor: cursor ?? undefined,
+      }),
+      listContactFieldDefs(db, ctx.tenantId),
+      listAllTags(db, ctx.tenantId),
+    ]);
+
   return NextResponse.json({
-    contacts: bundle.contacts.map(serializeContact),
-    customFieldDefinitions: bundle.customFieldDefinitions,
-    allTags: bundle.allTags,
+    contacts: contactList.map(serializeContact),
+    nextCursor: nextCursor
+      ? encodeCursor(nextCursor.updatedAt, nextCursor.id)
+      : null,
+    customFieldDefinitions: fieldDefs,
+    allTags,
     role: ctx.role,
   });
 }
@@ -65,16 +76,14 @@ export async function POST(req: NextRequest, route: RouteCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = (await req.json()) as {
-    phone?: string;
-    name?: string | null;
-    email?: string | null;
-    tagIds?: string[];
-    newTagNames?: string[];
-    customValues?: Record<string, unknown>;
-  };
+  const parsed = createContactSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    const msg = parsed.error.issues[0]?.message ?? "Dados inválidos";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+  const body = parsed.data;
 
-  const phone = body.phone ? normalizeE164(body.phone) : null;
+  const phone = normalizeE164(body.phone);
   if (!phone) {
     return NextResponse.json({ error: "Telefone inválido" }, { status: 400 });
   }
@@ -179,12 +188,7 @@ export async function POST(req: NextRequest, route: RouteCtx) {
         if (value === null || value === undefined) continue;
         await tx
           .insert(contactCustomValues)
-          .values({
-            contactId: contact.id,
-            fieldId,
-            value,
-            updatedAt: new Date(),
-          })
+          .values({ contactId: contact.id, fieldId, value, updatedAt: new Date() })
           .onConflictDoUpdate({
             target: [contactCustomValues.contactId, contactCustomValues.fieldId],
             set: { value, updatedAt: new Date() },
@@ -194,11 +198,9 @@ export async function POST(req: NextRequest, route: RouteCtx) {
       return contact;
     });
 
-    const bundle = await loadContactsBundle(db, ctx.tenantId);
-    const full = bundle.contacts.find((c) => c.id === result.id);
-    return NextResponse.json({
-      contact: full ? serializeContact(full) : null,
-    });
+    // Return only the created contact — no full-bundle reload.
+    const full = await getContactWithDetails(db, ctx.tenantId, result.id);
+    return NextResponse.json({ contact: full ? serializeContact(full) : null });
   } catch {
     const [existing] = await db
       .select()
@@ -208,8 +210,7 @@ export async function POST(req: NextRequest, route: RouteCtx) {
       )
       .limit(1);
     if (existing) {
-      const bundle = await loadContactsBundle(db, ctx.tenantId);
-      const full = bundle.contacts.find((c) => c.id === existing.id);
+      const full = await getContactWithDetails(db, ctx.tenantId, existing.id);
       return NextResponse.json({
         contact: full ? serializeContact(full) : null,
         existed: true,

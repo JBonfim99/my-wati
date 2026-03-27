@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { requireTenantContext } from "@/lib/api-tenant-context";
 import { getDb } from "@/lib/db";
 import { tenantIntegrations } from "@/lib/db/schema";
@@ -9,6 +10,15 @@ import { canManageIntegration } from "@/lib/rbac";
 import { encryptSecret } from "@/lib/crypto";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
+
+const putIntegrationSchema = z.object({
+  phoneNumberId: z.string().trim().min(1, "phoneNumberId é obrigatório"),
+  accessToken: z.string().trim().optional(),
+  webhookVerifyToken: z.string().trim().optional(),
+  appSecret: z.string().nullable().optional(),
+  businessAccountId: z.string().nullable().optional(),
+  graphApiVersion: z.string().trim().optional(),
+});
 
 export async function GET(_req: Request, route: RouteCtx) {
   const gate = await requireTenantContext((await route.params).tenantId);
@@ -54,14 +64,14 @@ export async function PUT(req: NextRequest, route: RouteCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = (await req.json()) as {
-    phoneNumberId?: string;
-    accessToken?: string;
-    webhookVerifyToken?: string;
-    appSecret?: string | null;
-    businessAccountId?: string | null;
-    graphApiVersion?: string;
-  };
+  const parsed = putIntegrationSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Dados inválidos" },
+      { status: 400 },
+    );
+  }
+  const body = parsed.data;
 
   const db = getDb();
   const [existing] = await db
@@ -70,16 +80,8 @@ export async function PUT(req: NextRequest, route: RouteCtx) {
     .where(eq(tenantIntegrations.tenantId, ctx.tenantId))
     .limit(1);
 
-  const phoneNumberId = body.phoneNumberId?.trim();
-  if (!phoneNumberId) {
-    return NextResponse.json(
-      { error: "phoneNumberId é obrigatório" },
-      { status: 400 },
-    );
-  }
-
   const verifyToken =
-    body.webhookVerifyToken?.trim() || existing?.webhookVerifyToken || "";
+    body.webhookVerifyToken || existing?.webhookVerifyToken || "";
   if (!verifyToken) {
     return NextResponse.json(
       {
@@ -91,8 +93,8 @@ export async function PUT(req: NextRequest, route: RouteCtx) {
   }
 
   let enc = existing?.encryptedAccessToken ?? "";
-  if (body.accessToken?.trim()) {
-    enc = encryptSecret(body.accessToken.trim());
+  if (body.accessToken) {
+    enc = encryptSecret(body.accessToken);
   }
   if (!enc) {
     return NextResponse.json(
@@ -109,9 +111,7 @@ export async function PUT(req: NextRequest, route: RouteCtx) {
       : (existing?.appSecret ?? null);
 
   const graphVersion =
-    body.graphApiVersion?.trim() ||
-    existing?.graphApiVersion ||
-    "v21.0";
+    body.graphApiVersion || existing?.graphApiVersion || "v21.0";
 
   const businessAccountId =
     body.businessAccountId !== undefined
@@ -122,7 +122,7 @@ export async function PUT(req: NextRequest, route: RouteCtx) {
     .insert(tenantIntegrations)
     .values({
       tenantId: ctx.tenantId,
-      phoneNumberId,
+      phoneNumberId: body.phoneNumberId,
       encryptedAccessToken: enc,
       webhookVerifyToken: verifyToken,
       appSecret: nextAppSecret,
@@ -132,7 +132,7 @@ export async function PUT(req: NextRequest, route: RouteCtx) {
     .onConflictDoUpdate({
       target: tenantIntegrations.tenantId,
       set: {
-        phoneNumberId,
+        phoneNumberId: body.phoneNumberId,
         encryptedAccessToken: enc,
         webhookVerifyToken: verifyToken,
         appSecret: nextAppSecret,
