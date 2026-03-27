@@ -3,8 +3,8 @@
 import { useTranslations } from "next-intl";
 import { Link, usePathname, useRouter } from "@/i18n/navigation";
 import {
-  FolderOpen,
   LayoutDashboard,
+  List,
   LogOut,
   MessageSquare,
   Phone,
@@ -68,7 +68,7 @@ export function AppNav({
       items: [
         { href: `${base}/contacts`, label: t("contacts"), icon: Phone },
         { href: `${base}/tags`, label: t("tags"), icon: Tags },
-        { href: `${base}/lists`, label: t("lists"), icon: FolderOpen },
+        { href: `${base}/lists`, label: t("lists"), icon: List },
         {
           href: `${base}/templates`,
           label: t("templates"),

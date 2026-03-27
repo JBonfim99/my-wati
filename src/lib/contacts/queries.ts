@@ -14,6 +14,7 @@ import type { AppDb } from "@/lib/db";
 import {
   contactCustomFieldDefinitions,
   contactCustomValues,
+  contactListMembers,
   contactLists,
   contactTags,
   contacts,
@@ -171,6 +172,122 @@ export async function listContacts(
   }));
 
   const last = contactRows[contactRows.length - 1];
+  const nextCursor: ContactCursor | null =
+    hasMore && last
+      ? { updatedAt: last.updatedAt.toISOString(), id: last.id }
+      : null;
+
+  return { contacts: result, nextCursor };
+}
+
+/**
+ * Contatos que pertencem a uma lista do tenant, mesma ordenação/cursor que `listContacts`.
+ */
+export async function listContactsInList(
+  db: AppDb,
+  tenantId: number,
+  listId: number,
+  opts: { limit: number; cursor?: ContactCursor },
+): Promise<{ contacts: ContactRowDto[]; nextCursor: ContactCursor | null }> {
+  const { limit, cursor } = opts;
+
+  const conditions: SQL[] = [
+    eq(contacts.tenantId, tenantId),
+    eq(contactLists.tenantId, tenantId),
+    eq(contactLists.id, listId),
+  ];
+
+  if (cursor) {
+    conditions.push(
+      or(
+        lt(contacts.updatedAt, new Date(cursor.updatedAt)),
+        and(
+          eq(contacts.updatedAt, new Date(cursor.updatedAt)),
+          lt(contacts.id, cursor.id),
+        ),
+      )!,
+    );
+  }
+
+  const contactRows = await db
+    .select({
+      id: contacts.id,
+      tenantId: contacts.tenantId,
+      phoneE164: contacts.phoneE164,
+      name: contacts.name,
+      email: contacts.email,
+      createdAt: contacts.createdAt,
+      updatedAt: contacts.updatedAt,
+    })
+    .from(contacts)
+    .innerJoin(
+      contactListMembers,
+      and(
+        eq(contactListMembers.contactId, contacts.id),
+        eq(contactListMembers.listId, listId),
+      ),
+    )
+    .innerJoin(contactLists, eq(contactLists.id, contactListMembers.listId))
+    .where(and(...conditions))
+    .orderBy(desc(contacts.updatedAt), desc(contacts.id))
+    .limit(limit + 1);
+
+  const hasMore = contactRows.length > limit;
+  const slice = hasMore ? contactRows.slice(0, limit) : contactRows;
+
+  if (slice.length === 0) {
+    return { contacts: [], nextCursor: null };
+  }
+
+  const ids = slice.map((c) => c.id);
+  const [tagAssign, valueRows] = await Promise.all([
+    db
+      .select({
+        contactId: contactTags.contactId,
+        tagId: tags.id,
+        tagName: tags.name,
+        tagSlug: tags.slug,
+      })
+      .from(contactTags)
+      .innerJoin(tags, eq(tags.id, contactTags.tagId))
+      .where(inArray(contactTags.contactId, ids)),
+    db
+      .select({
+        contactId: contactCustomValues.contactId,
+        fieldId: contactCustomValues.fieldId,
+        value: contactCustomValues.value,
+      })
+      .from(contactCustomValues)
+      .where(inArray(contactCustomValues.contactId, ids)),
+  ]);
+
+  const tagByContact = new Map<number, ContactTagDto[]>();
+  for (const row of tagAssign) {
+    const list = tagByContact.get(row.contactId) ?? [];
+    list.push({ id: row.tagId, name: row.tagName, slug: row.tagSlug });
+    tagByContact.set(row.contactId, list);
+  }
+
+  const valuesByContact = new Map<number, Record<string, unknown>>();
+  for (const row of valueRows) {
+    const m = valuesByContact.get(row.contactId) ?? {};
+    m[row.fieldId] = row.value;
+    valuesByContact.set(row.contactId, m);
+  }
+
+  const result: ContactRowDto[] = slice.map((c) => ({
+    id: c.id,
+    tenantId: c.tenantId,
+    phoneE164: c.phoneE164,
+    name: c.name,
+    email: c.email,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    tags: tagByContact.get(c.id) ?? [],
+    customValues: valuesByContact.get(c.id) ?? {},
+  }));
+
+  const last = slice[slice.length - 1];
   const nextCursor: ContactCursor | null =
     hasMore && last
       ? { updatedAt: last.updatedAt.toISOString(), id: last.id }

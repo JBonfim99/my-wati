@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { List, Pencil, Plus, Trash2, X } from "lucide-react";
 import { DeleteConfirmDialog } from "../../contacts/_components/DeleteConfirmDialog";
+import { ListMembersModal } from "./ListMembersModal";
 
 export type SerializedListRow = {
   id: number;
@@ -41,6 +42,9 @@ export function ListsPageClient({
 
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const [membersModalList, setMembersModalList] =
+    useState<SerializedListRow | null>(null);
 
   useEffect(() => {
     setLists(initialLists);
@@ -146,21 +150,26 @@ export function ListsPageClient({
           }}
         />
         <div className="relative flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
-          <div>
-            <h1 className="font-display text-2xl font-bold tracking-tight text-fg sm:text-3xl">
-              {t("title")}
-            </h1>
-            <p className="mt-1 max-w-2xl text-sm text-fg-secondary">
-              {t("subtitle")}
-            </p>
-            <p className="mt-2 text-xs text-fg-muted">
-              <Link
-                href={`/${tenantId}/contacts`}
-                className="text-primary-600 underline-offset-2 hover:underline"
-              >
-                ← {tNav("contacts")}
-              </Link>
-            </p>
+          <div className="flex gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-lg">
+              <List className="h-7 w-7" strokeWidth={1.5} aria-hidden />
+            </div>
+            <div>
+              <h1 className="font-display text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+                {t("title")}
+              </h1>
+              <p className="mt-1 max-w-2xl text-sm text-fg-secondary">
+                {t("subtitle")}
+              </p>
+              <p className="mt-2 text-xs text-fg-muted">
+                <Link
+                  href={`/${tenantId}/contacts`}
+                  className="text-primary-600 underline-offset-2 hover:underline"
+                >
+                  ← {tNav("contacts")}
+                </Link>
+              </p>
+            </div>
           </div>
         </div>
       </header>
@@ -254,8 +263,17 @@ export function ListsPageClient({
                         row.name
                       )}
                     </td>
-                    <td className="tabular-nums text-fg-secondary">
-                      {format.number(row.memberCount)}
+                    <td className="tabular-nums">
+                      <button
+                        type="button"
+                        className="text-primary-600 underline-offset-2 hover:underline focus-visible:rounded focus-visible:outline focus-visible:ring-2 focus-visible:ring-primary-500"
+                        onClick={() => setMembersModalList(row)}
+                        aria-label={t("listMembersOpenCount", {
+                          name: row.name,
+                        })}
+                      >
+                        {format.number(row.memberCount)}
+                      </button>
                     </td>
                     <td className="whitespace-nowrap text-sm text-fg-secondary">
                       {formatCreatedAt(row.createdAt)}
@@ -338,7 +356,16 @@ export function ListsPageClient({
                       <p className="font-medium text-fg">{row.name}</p>
                       <p className="mt-1 text-sm text-fg-secondary">
                         {t("colMemberCount")}:{" "}
-                        {format.number(row.memberCount)}
+                        <button
+                          type="button"
+                          className="text-primary-600 underline-offset-2 hover:underline focus-visible:rounded focus-visible:outline focus-visible:ring-2 focus-visible:ring-primary-500"
+                          onClick={() => setMembersModalList(row)}
+                          aria-label={t("listMembersOpenCount", {
+                            name: row.name,
+                          })}
+                        >
+                          {format.number(row.memberCount)}
+                        </button>
                       </p>
                       <p className="mt-0.5 text-xs text-fg-muted">
                         {t("colCreatedAt")}: {formatCreatedAt(row.createdAt)}
@@ -381,6 +408,16 @@ export function ListsPageClient({
           onCancel={() => setDeleteId(null)}
         />
       ) : null}
+
+      <ListMembersModal
+        tenantId={tenantId}
+        list={
+          membersModalList
+            ? { id: membersModalList.id, name: membersModalList.name }
+            : null
+        }
+        onClose={() => setMembersModalList(null)}
+      />
     </div>
   );
 }

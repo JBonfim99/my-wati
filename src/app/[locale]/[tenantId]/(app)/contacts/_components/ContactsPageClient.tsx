@@ -44,6 +44,7 @@ import {
   type TagDto,
 } from "@/components/contacts/ContactFormModal";
 import { BulkCustomValueInput } from "./BulkCustomValueInput";
+import { BulkListPickField } from "./BulkListPickField";
 import { BulkTagSearchField } from "./BulkTagSearchField";
 import { ContactImportWizard } from "./ContactImportWizard";
 
@@ -953,7 +954,11 @@ export function ContactsPageClient({
           onClick={() => !bulkOpBusy && setBulkExtra(null)}
         >
           <div
-            className="max-h-[min(90vh,520px)] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-xl"
+            className={`w-full overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-xl ${
+              bulkExtra.kind === "add_lists" || bulkExtra.kind === "remove_lists"
+                ? "max-h-[min(92vh,640px)] max-w-lg"
+                : "max-h-[min(90vh,520px)] max-w-md"
+            }`}
             onClick={(e) => e.stopPropagation()}
           >
             <p className="font-display text-lg font-semibold text-fg">
@@ -999,10 +1004,9 @@ export function ContactsPageClient({
                     {t("filterNoListsInOrg")}
                   </p>
                 ) : (
-                  <BulkTagSearchField
+                  <BulkListPickField
                     key={bulkExtra.kind}
-                    variant="lists"
-                    tags={sortedListsForModal.map((l) => ({
+                    lists={sortedListsForModal.map((l) => ({
                       id: String(l.id),
                       name: l.name,
                     }))}
