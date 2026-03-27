@@ -7,30 +7,14 @@ import {
   contacts,
   tags,
 } from "@/lib/db/schema";
+import type {
+  ContactCustomFieldDefDto,
+  ContactRowDto,
+  ContactTagDto,
+} from "./queries";
 
-export type ContactTagDto = { id: string; name: string; slug: string };
-
-export type CustomFieldDefDto = {
-  id: string;
-  key: string;
-  label: string;
-  fieldType: string;
-  config: unknown;
-  defaultValue: unknown;
-  sortOrder: number;
-};
-
-export type ContactRowDto = {
-  id: string;
-  tenantId: number;
-  phoneE164: string;
-  name: string | null;
-  email: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  tags: ContactTagDto[];
-  customValues: Record<string, unknown>;
-};
+export type { ContactTagDto };
+export type CustomFieldDefDto = ContactCustomFieldDefDto;
 
 export async function loadContactsBundle(
   db: AppDb,
@@ -90,7 +74,7 @@ export async function loadContactsBundle(
     .innerJoin(tags, eq(tags.id, contactTags.tagId))
     .where(inArray(contactTags.contactId, ids));
 
-  const tagByContact = new Map<string, ContactTagDto[]>();
+  const tagByContact = new Map<number, ContactTagDto[]>();
   for (const row of tagAssign) {
     const list = tagByContact.get(row.contactId) ?? [];
     list.push({
@@ -110,7 +94,7 @@ export async function loadContactsBundle(
     .from(contactCustomValues)
     .where(inArray(contactCustomValues.contactId, ids));
 
-  const valuesByContact = new Map<string, Record<string, unknown>>();
+  const valuesByContact = new Map<number, Record<string, unknown>>();
   for (const row of valueRows) {
     const m = valuesByContact.get(row.contactId) ?? {};
     m[row.fieldId] = row.value;
@@ -140,7 +124,7 @@ export async function loadContactsBundle(
 export async function getContactForTenant(
   db: AppDb,
   tenantId: number,
-  contactId: string,
+  contactId: number,
 ) {
   const [row] = await db
     .select()

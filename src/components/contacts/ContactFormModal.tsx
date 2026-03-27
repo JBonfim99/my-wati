@@ -15,7 +15,7 @@ import {
 import type { SerializedContactDto } from "@/lib/contacts/dto";
 import { ContactTagsSection } from "./ContactTagsSection";
 
-export type TagDto = { id: string; name: string; slug: string };
+export type TagDto = { id: number; name: string; slug: string };
 export type DefDto = {
   id: string;
   key: string;
@@ -72,7 +72,7 @@ export function ContactFormModal({
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(
     () => new Set(),
   );
   const [custom, setCustom] = useState<Record<string, string>>({});
@@ -122,9 +122,9 @@ export function ContactFormModal({
   const waHref =
     waDigits.length > 0 ? `https://wa.me/${waDigits}` : undefined;
 
-  async function copyContactId(id: string) {
+  async function copyContactId(id: string | number) {
     try {
-      await navigator.clipboard.writeText(id);
+      await navigator.clipboard.writeText(String(id));
       setCopiedContactId(true);
       window.setTimeout(() => setCopiedContactId(false), 2000);
     } catch {
@@ -396,7 +396,7 @@ export function ContactFormModal({
                       <div className="flex items-center gap-1.5">
                         <p
                           className="truncate font-mono text-xs text-fg-secondary"
-                          title={contact.id}
+                          title={String(contact.id)}
                         >
                           {contact.id}
                         </p>

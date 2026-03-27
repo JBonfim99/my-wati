@@ -21,6 +21,10 @@ import {
   tags,
 } from "@/lib/db/schema";
 import { requireTenantContext } from "@/lib/api-tenant-context";
+import {
+  parsePublicEightDigitParam,
+  zEightDigitIdArray,
+} from "@/lib/ids/eight-digit";
 import { canWriteContacts } from "@/lib/rbac";
 
 type Ctx = { params: Promise<{ tenantId: string; id: string }> };
@@ -29,20 +33,24 @@ const patchContactSchema = z.object({
   phone: z.string().optional(),
   name: z.string().nullable().optional(),
   email: z.string().email().nullable().optional(),
-  tagIds: z.array(z.string().uuid()).optional(),
+  tagIds: zEightDigitIdArray.optional(),
   newTagNames: z.array(z.string()).optional(),
   customValues: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function GET(_req: NextRequest, route: Ctx) {
-  const { tenantId: tp, id } = await route.params;
+  const { tenantId: tp, id: idParam } = await route.params;
+  const contactId = parsePublicEightDigitParam(idParam);
+  if (contactId === null) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const gate = await requireTenantContext(tp);
   if (!gate.ok) return gate.response;
   const session = gate.ctx;
   const db = getDb();
 
   const [contact, fieldDefs, allTags] = await Promise.all([
-    getContactWithDetails(db, session.tenantId, id),
+    getContactWithDetails(db, session.tenantId, contactId),
     listContactFieldDefs(db, session.tenantId),
     listAllTags(db, session.tenantId),
   ]);
@@ -59,7 +67,11 @@ export async function GET(_req: NextRequest, route: Ctx) {
 }
 
 export async function PATCH(req: NextRequest, route: Ctx) {
-  const { tenantId: tp, id } = await route.params;
+  const { tenantId: tp, id: idParam } = await route.params;
+  const contactId = parsePublicEightDigitParam(idParam);
+  if (contactId === null) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const gate = await requireTenantContext(tp);
   if (!gate.ok) return gate.response;
   const session = gate.ctx;
@@ -78,7 +90,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
 
   // Load existing contact + field defs before the transaction
   const [existing, allDefs] = await Promise.all([
-    getContactWithDetails(db, session.tenantId, id),
+    getContactWithDetails(db, session.tenantId, contactId),
     listContactFieldDefs(db, session.tenantId),
   ]);
 
@@ -127,7 +139,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
           ),
         )
         .limit(1);
-      if (dup && dup.id !== id) {
+      if (dup && dup.id !== contactId) {
         return NextResponse.json(
           { error: "Já existe um contato com este telefone." },
           { status: 409 },
@@ -150,10 +162,12 @@ export async function PATCH(req: NextRequest, route: Ctx) {
             : existing.email,
         updatedAt: new Date(),
       })
-      .where(and(eq(contacts.tenantId, session.tenantId), eq(contacts.id, id)));
+      .where(
+        and(eq(contacts.tenantId, session.tenantId), eq(contacts.id, contactId)),
+      );
 
     if (body.tagIds !== undefined || body.newTagNames !== undefined) {
-      await tx.delete(contactTags).where(eq(contactTags.contactId, id));
+      await tx.delete(contactTags).where(eq(contactTags.contactId, contactId));
 
       const tagIdSet = new Set(body.tagIds ?? []);
       for (const label of body.newTagNames ?? []) {
@@ -180,7 +194,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
         if (okTag) {
           await tx
             .insert(contactTags)
-            .values({ contactId: id, tagId: tid })
+            .values({ contactId: contactId, tagId: tid })
             .onConflictDoNothing();
         }
       }
@@ -201,14 +215,19 @@ export async function PATCH(req: NextRequest, route: Ctx) {
       if (redundant) {
         await tx.delete(contactCustomValues).where(
           and(
-            eq(contactCustomValues.contactId, id),
+            eq(contactCustomValues.contactId, contactId),
             eq(contactCustomValues.fieldId, fieldId),
           ),
         );
       } else {
         await tx
           .insert(contactCustomValues)
-          .values({ contactId: id, fieldId, value, updatedAt: new Date() })
+          .values({
+            contactId: contactId,
+            fieldId,
+            value,
+            updatedAt: new Date(),
+          })
           .onConflictDoUpdate({
             target: [contactCustomValues.contactId, contactCustomValues.fieldId],
             set: { value, updatedAt: new Date() },
@@ -218,12 +237,16 @@ export async function PATCH(req: NextRequest, route: Ctx) {
   });
 
   // Return only the updated contact — no full-bundle reload.
-  const updated = await getContactWithDetails(db, session.tenantId, id);
+  const updated = await getContactWithDetails(db, session.tenantId, contactId);
   return NextResponse.json({ contact: updated ? serializeContact(updated) : null });
 }
 
 export async function DELETE(_req: NextRequest, route: Ctx) {
-  const { tenantId: tp, id } = await route.params;
+  const { tenantId: tp, id: idParam } = await route.params;
+  const contactId = parsePublicEightDigitParam(idParam);
+  if (contactId === null) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const gate = await requireTenantContext(tp);
   if (!gate.ok) return gate.response;
   const session = gate.ctx;
@@ -231,11 +254,11 @@ export async function DELETE(_req: NextRequest, route: Ctx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const db = getDb();
-  const existing = await getContactWithDetails(db, session.tenantId, id);
+  const existing = await getContactWithDetails(db, session.tenantId, contactId);
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  await db.delete(contacts).where(eq(contacts.id, id));
+  await db.delete(contacts).where(eq(contacts.id, contactId));
   return NextResponse.json({ ok: true });
 }

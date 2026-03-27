@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import type { MessageTemplateRecord } from "@/lib/meta/graph";
 
-type ListRow = { id: string; name: string };
+type ListRow = { id: number; name: string };
 
 function templateOptionValue(tpl: MessageTemplateRecord): string {
   return JSON.stringify({ name: tpl.name, language: tpl.language });
@@ -31,7 +31,9 @@ export function NewCampaignForm({ tenantId, initialLists }: Props) {
   const [lists] = useState(initialLists);
   const [name, setName] = useState("");
   const [templateKey, setTemplateKey] = useState("");
-  const [listId, setListId] = useState(initialLists[0]?.id ?? "");
+  const [listId, setListId] = useState(
+    initialLists[0] !== undefined ? String(initialLists[0].id) : "",
+  );
   const [err, setErr] = useState<string | null>(null);
   const [templatesLoading, setTemplatesLoading] = useState(true);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
@@ -90,10 +92,16 @@ export function NewCampaignForm({ tenantId, initialLists }: Props) {
       return;
     }
 
+    const listIdNum = Number.parseInt(listId, 10);
     const res = await fetch(`/api/t/${tenantId}/campaigns`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, templateName, templateLanguage, listId }),
+      body: JSON.stringify({
+        name,
+        templateName,
+        templateLanguage,
+        listId: listIdNum,
+      }),
     });
     if (!res.ok) {
       const j = (await res.json()) as { error?: string };
@@ -162,7 +170,7 @@ export function NewCampaignForm({ tenantId, initialLists }: Props) {
             className="ds-select"
           >
             {lists.map((l) => (
-              <option key={l.id} value={l.id}>
+              <option key={l.id} value={String(l.id)}>
                 {l.name}
               </option>
             ))}

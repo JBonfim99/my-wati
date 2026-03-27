@@ -32,8 +32,8 @@ import {
   type ListFilterOp,
 } from "./contacts-list-query";
 
-type TagOpt = { id: string; name: string };
-type ListOpt = { id: string; name: string };
+type TagOpt = { id: number; name: string };
+type ListOpt = { id: number; name: string };
 type FieldDefOpt = { id: string; label: string; fieldType: FieldType };
 
 type CategoryId = "general" | "system" | "custom";
@@ -491,7 +491,7 @@ export function ContactsFilterShell({
                       >
                         <option value="">{t("filterTagPick")}</option>
                         {sortedTags.map((tg) => (
-                          <option key={tg.id} value={tg.id}>
+                          <option key={tg.id} value={String(tg.id)}>
                             {tg.name}
                           </option>
                         ))}

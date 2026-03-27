@@ -13,7 +13,7 @@ import { Plus, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 export type ContactTagsSectionTag = {
-  id: string;
+  id: number;
   name: string;
   slug: string;
 };
@@ -21,8 +21,8 @@ export type ContactTagsSectionTag = {
 type Props = {
   tenantId: string;
   allTags: ContactTagsSectionTag[];
-  selectedTagIds: Set<string>;
-  onSelectionChange: (next: Set<string>) => void;
+  selectedTagIds: Set<number>;
+  onSelectionChange: (next: Set<number>) => void;
   onTagCreated: (tag: ContactTagsSectionTag) => void;
   readOnly: boolean;
 };
@@ -103,14 +103,14 @@ export function ContactTagsSection({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  function removeTag(id: string) {
+  function removeTag(id: number) {
     if (readOnly) return;
     onSelectionChange(
       new Set([...selectedTagIds].filter((x) => x !== id)),
     );
   }
 
-  function addTag(id: string) {
+  function addTag(id: number) {
     if (readOnly) return;
     const next = new Set(selectedTagIds);
     next.add(id);

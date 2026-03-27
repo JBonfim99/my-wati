@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { zEightDigitIdArray } from "@/lib/ids/eight-digit";
 
 /** Máximo de linhas de dados (excl. cabeçalho) por job de importação. */
 export const CONTACT_IMPORT_MAX_ROWS = 5_000;
@@ -27,7 +28,7 @@ export const contactsImportPayloadSchema = z
       .min(1)
       .max(CONTACT_IMPORT_MAX_ROWS),
     mapping: z.record(z.string(), contactImportColumnMappingSchema),
-    tagIds: z.array(z.string().uuid()).max(3).optional().default([]),
+    tagIds: zEightDigitIdArray.max(3).optional().default([]),
   })
   .superRefine((data, ctx) => {
     const w = data.headers.length;

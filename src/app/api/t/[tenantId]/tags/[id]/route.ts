@@ -5,6 +5,7 @@ import { slugify } from "@/lib/contacts/slug";
 import { getDb } from "@/lib/db";
 import { tags } from "@/lib/db/schema";
 import { requireTenantContext } from "@/lib/api-tenant-context";
+import { parsePublicEightDigitParam } from "@/lib/ids/eight-digit";
 import { canWriteContacts } from "@/lib/rbac";
 
 type Ctx = { params: Promise<{ tenantId: string; id: string }> };
@@ -14,7 +15,11 @@ const patchTagSchema = z.object({
 });
 
 export async function PATCH(req: NextRequest, route: Ctx) {
-  const { tenantId: tp, id } = await route.params;
+  const { tenantId: tp, id: idParam } = await route.params;
+  const tagId = parsePublicEightDigitParam(idParam);
+  if (tagId === null) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const gate = await requireTenantContext(tp);
   if (!gate.ok) return gate.response;
   const session = gate.ctx;
@@ -35,7 +40,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
   const [existing] = await db
     .select()
     .from(tags)
-    .where(and(eq(tags.tenantId, session.tenantId), eq(tags.id, id)))
+    .where(and(eq(tags.tenantId, session.tenantId), eq(tags.id, tagId)))
     .limit(1);
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -50,7 +55,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
       .from(tags)
       .where(and(eq(tags.tenantId, session.tenantId), eq(tags.slug, candidate)))
       .limit(1);
-    if (!taken || taken.id === id) break;
+    if (!taken || taken.id === tagId) break;
     n += 1;
     candidate = `${key}-${n}`;
   }
@@ -58,7 +63,7 @@ export async function PATCH(req: NextRequest, route: Ctx) {
   const [row] = await db
     .update(tags)
     .set({ name, slug: candidate })
-    .where(and(eq(tags.tenantId, session.tenantId), eq(tags.id, id)))
+    .where(and(eq(tags.tenantId, session.tenantId), eq(tags.id, tagId)))
     .returning({ id: tags.id, name: tags.name, slug: tags.slug, createdAt: tags.createdAt });
 
   return NextResponse.json({
@@ -69,7 +74,11 @@ export async function PATCH(req: NextRequest, route: Ctx) {
 }
 
 export async function DELETE(_req: NextRequest, route: Ctx) {
-  const { tenantId: tp, id } = await route.params;
+  const { tenantId: tp, id: idParam } = await route.params;
+  const tagId = parsePublicEightDigitParam(idParam);
+  if (tagId === null) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const gate = await requireTenantContext(tp);
   if (!gate.ok) return gate.response;
   const session = gate.ctx;
@@ -80,7 +89,7 @@ export async function DELETE(_req: NextRequest, route: Ctx) {
   const [existing] = await db
     .select({ id: tags.id })
     .from(tags)
-    .where(and(eq(tags.tenantId, session.tenantId), eq(tags.id, id)))
+    .where(and(eq(tags.tenantId, session.tenantId), eq(tags.id, tagId)))
     .limit(1);
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -88,7 +97,7 @@ export async function DELETE(_req: NextRequest, route: Ctx) {
 
   await db
     .delete(tags)
-    .where(and(eq(tags.tenantId, session.tenantId), eq(tags.id, id)));
+    .where(and(eq(tags.tenantId, session.tenantId), eq(tags.id, tagId)));
 
   return NextResponse.json({ ok: true });
 }

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   uuid,
@@ -108,7 +109,9 @@ export const tenantMemberships = pgTable(
 export const contacts = pgTable(
   "contacts",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .default(sql`next_eight_digit_contacts_id()`),
     tenantId: bigint("tenant_id", { mode: "number" })
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
@@ -131,7 +134,9 @@ export const contacts = pgTable(
 export const tags = pgTable(
   "tags",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .default(sql`next_eight_digit_tags_id()`),
     tenantId: bigint("tenant_id", { mode: "number" })
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
@@ -147,10 +152,10 @@ export const tags = pgTable(
 export const contactTags = pgTable(
   "contact_tags",
   {
-    contactId: uuid("contact_id")
+    contactId: bigint("contact_id", { mode: "number" })
       .notNull()
       .references(() => contacts.id, { onDelete: "cascade" }),
-    tagId: uuid("tag_id")
+    tagId: bigint("tag_id", { mode: "number" })
       .notNull()
       .references(() => tags.id, { onDelete: "cascade" }),
   },
@@ -190,7 +195,7 @@ export const contactCustomFieldDefinitions = pgTable(
 export const contactCustomValues = pgTable(
   "contact_custom_values",
   {
-    contactId: uuid("contact_id")
+    contactId: bigint("contact_id", { mode: "number" })
       .notNull()
       .references(() => contacts.id, { onDelete: "cascade" }),
     fieldId: uuid("field_id")
@@ -213,7 +218,9 @@ export const contactCustomValues = pgTable(
 export const contactLists = pgTable(
   "contact_lists",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .default(sql`next_eight_digit_contact_lists_id()`),
     tenantId: bigint("tenant_id", { mode: "number" })
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
@@ -228,10 +235,10 @@ export const contactLists = pgTable(
 export const contactListMembers = pgTable(
   "contact_list_members",
   {
-    listId: uuid("list_id")
+    listId: bigint("list_id", { mode: "number" })
       .notNull()
       .references(() => contactLists.id, { onDelete: "cascade" }),
-    contactId: uuid("contact_id")
+    contactId: bigint("contact_id", { mode: "number" })
       .notNull()
       .references(() => contacts.id, { onDelete: "cascade" }),
   },
@@ -253,9 +260,12 @@ export const campaigns = pgTable(
     templateLanguage: text("template_language").notNull().default("pt_BR"),
     /** Body/header variable components for Graph API */
     templateComponents: jsonb("template_components").$type<unknown[]>(),
-    listId: uuid("list_id").references(() => contactLists.id, {
-      onDelete: "set null",
-    }),
+    listId: bigint("list_id", { mode: "number" }).references(
+      () => contactLists.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     status: campaignStatusEnum("status").notNull().default("draft"),
     createdBy: uuid("created_by").references(() => profiles.id),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -275,9 +285,12 @@ export const campaignRecipients = pgTable(
     tenantId: bigint("tenant_id", { mode: "number" })
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    contactId: uuid("contact_id").references(() => contacts.id, {
-      onDelete: "set null",
-    }),
+    contactId: bigint("contact_id", { mode: "number" }).references(
+      () => contacts.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     phoneE164: text("phone_e164").notNull(),
     status: recipientStatusEnum("status").notNull().default("pending"),
     wamid: text("wamid"),

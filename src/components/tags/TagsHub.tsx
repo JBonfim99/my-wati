@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 
 type TagRow = {
-  id: string;
+  id: number;
   name: string;
   slug: string;
   createdAt: string;
@@ -37,13 +37,13 @@ export default function TagsHub() {
   const [createBusy, setCreateBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [saveBusy, setSaveBusy] = useState(false);
 
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [copiedTagId, setCopiedTagId] = useState<string | null>(null);
+  const [copiedTagId, setCopiedTagId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(api);
@@ -126,9 +126,9 @@ export default function TagsHub() {
     await load();
   }
 
-  async function copyTagId(id: string) {
+  async function copyTagId(id: number) {
     try {
-      await navigator.clipboard.writeText(id);
+      await navigator.clipboard.writeText(String(id));
       setCopiedTagId(id);
       window.setTimeout(() => {
         setCopiedTagId((cur) => (cur === id ? null : cur));
@@ -268,7 +268,7 @@ export default function TagsHub() {
                       )}
                     </td>
                     <td className="hidden max-w-[200px] font-mono text-[11px] text-fg-muted lg:table-cell">
-                      <span className="block truncate" title={row.id}>
+                      <span className="block truncate" title={String(row.id)}>
                         {row.id}
                       </span>
                     </td>

@@ -7,6 +7,7 @@ import {
   CONTACT_IMPORT_MAX_ROWS,
   type ContactImportColumnMapping,
 } from "@/lib/contacts/import-schema";
+import { awaitContactsJobSse } from "@/lib/contacts/contacts-job-sse-client";
 import {
   guessSystemMappingFromHeader,
   parseCsv,
@@ -15,7 +16,7 @@ import {
 import type { FieldType } from "@/lib/contacts/validate-custom-value";
 
 type FieldDefOpt = { id: string; label: string; fieldType: FieldType };
-type TagOpt = { id: string; name: string };
+type TagOpt = { id: number; name: string };
 
 type Props = {
   open: boolean;
@@ -72,11 +73,6 @@ function isImportMapOptionAllowed(
   return true;
 }
 
-type ImportPollOutcome =
-  | { kind: "completed"; result: unknown }
-  | { kind: "failed"; reason: string | null }
-  | { kind: "timeout" };
-
 export function ContactImportWizard({
   open,
   onClose,
@@ -94,7 +90,7 @@ export function ContactImportWizard({
   const [mapping, setMapping] = useState<
     Record<string, ContactImportColumnMapping>
   >({});
-  const [tagIds, setTagIds] = useState<Set<string>>(() => new Set());
+  const [tagIds, setTagIds] = useState<Set<number>>(() => new Set());
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -165,37 +161,6 @@ export function ContactImportWizard({
     reader.readAsText(file, "UTF-8");
   }
 
-  const pollImportJob = useCallback(
-    async (jobId: string): Promise<ImportPollOutcome> => {
-      const url = `${importApi}/${encodeURIComponent(jobId)}`;
-      const deadline = Date.now() + 300_000;
-      let nextWaitMs = 1200;
-      const maxWaitMs = 5000;
-      while (Date.now() < deadline) {
-        const res = await fetch(url);
-        if (!res.ok) {
-          return { kind: "failed", reason: t("bulkJobStatusError") };
-        }
-        const j = (await res.json()) as {
-          state: string;
-          failedReason?: string | null;
-          result?: unknown;
-        };
-        if (j.state === "completed") {
-          return { kind: "completed", result: j.result ?? null };
-        }
-        if (j.state === "failed") {
-          return { kind: "failed", reason: j.failedReason ?? null };
-        }
-        const w = nextWaitMs;
-        nextWaitMs = Math.min(maxWaitMs, Math.round(nextWaitMs * 1.5));
-        await new Promise((r) => setTimeout(r, w));
-      }
-      return { kind: "timeout" };
-    },
-    [importApi, t],
-  );
-
   async function handleConfirmImport() {
     if (!parsed) return;
     setSubmitError(null);
@@ -225,7 +190,11 @@ export function ContactImportWizard({
         setSubmitBusy(false);
         return;
       }
-      const outcome = await pollImportJob(bodyJson.jobId);
+      const streamUrl = `${importApi}/${encodeURIComponent(bodyJson.jobId)}/stream`;
+      const outcome = await awaitContactsJobSse({
+        url: streamUrl,
+        statusErrorMessage: t("bulkJobStatusError"),
+      });
       setSubmitBusy(false);
       if (outcome.kind === "failed") {
         setSubmitError(outcome.reason ?? t("bulkJobFailed"));

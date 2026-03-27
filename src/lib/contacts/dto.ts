@@ -1,3 +1,4 @@
+import { EIGHT_DIGIT_MAX, EIGHT_DIGIT_MIN } from "@/lib/ids/eight-digit";
 import type { ContactRowDto } from "./queries";
 
 /**
@@ -5,14 +6,14 @@ import type { ContactRowDto } from "./queries";
  * Dates are ISO strings; tenantId is included for context but not critical client-side.
  */
 export type SerializedContactDto = {
-  id: string;
+  id: number;
   tenantId: number;
   phoneE164: string;
   name: string | null;
   email: string | null;
   createdAt: string;
   updatedAt: string;
-  tags: { id: string; name: string; slug: string }[];
+  tags: { id: number; name: string; slug: string }[];
   customValues: Record<string, unknown>;
 };
 
@@ -38,7 +39,7 @@ export function serializeContact(c: ContactRowDto): SerializedContactDto {
  * Encodes a cursor for paginated contact listings.
  * Format: base64(JSON({ updatedAt, id }))
  */
-export function encodeCursor(updatedAt: string, id: string): string {
+export function encodeCursor(updatedAt: string, id: number): string {
   return Buffer.from(JSON.stringify({ updatedAt, id })).toString("base64");
 }
 
@@ -47,22 +48,38 @@ export function encodeCursor(updatedAt: string, id: string): string {
  */
 export function decodeCursor(
   raw: string,
-): { updatedAt: string; id: string } | null {
+): { updatedAt: string; id: number } | null {
   try {
     const parsed = JSON.parse(
       Buffer.from(raw, "base64").toString("utf8"),
     ) as unknown;
     if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "updatedAt" in parsed &&
-      "id" in parsed &&
-      typeof (parsed as { updatedAt: unknown }).updatedAt === "string" &&
-      typeof (parsed as { id: unknown }).id === "string"
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("updatedAt" in parsed) ||
+      !("id" in parsed) ||
+      typeof (parsed as { updatedAt: unknown }).updatedAt !== "string"
     ) {
-      return parsed as { updatedAt: string; id: string };
+      return null;
     }
-    return null;
+    const idRaw = (parsed as { id: unknown }).id;
+    const id =
+      typeof idRaw === "number"
+        ? idRaw
+        : typeof idRaw === "string"
+          ? Number.parseInt(idRaw, 10)
+          : NaN;
+    if (
+      !Number.isFinite(id) ||
+      id < EIGHT_DIGIT_MIN ||
+      id > EIGHT_DIGIT_MAX
+    ) {
+      return null;
+    }
+    return {
+      updatedAt: (parsed as { updatedAt: string }).updatedAt,
+      id,
+    };
   } catch {
     return null;
   }

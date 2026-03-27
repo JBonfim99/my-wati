@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { bulkContactsJobSchema } from "@/lib/contacts/bulk-schema";
-import { getBulkContactsQueue } from "@/lib/queues/bulk-contacts-queue";
+import { getBulkContactsJobStatusForTenant } from "@/lib/queues/contacts-job-status";
 import { requireTenantContext } from "@/lib/api-tenant-context";
 import { canWriteContacts } from "@/lib/rbac";
 
@@ -21,38 +20,10 @@ export async function GET(_req: Request, route: RouteCtx) {
     return NextResponse.json({ error: "jobId obrigatório" }, { status: 400 });
   }
 
-  const queue = getBulkContactsQueue();
-  const job = await queue.getJob(jobId);
-  if (!job) {
+  const r = await getBulkContactsJobStatusForTenant(jobId, ctx.tenantId);
+  if (!r.ok) {
     return NextResponse.json({ error: "Job não encontrado" }, { status: 404 });
   }
 
-  const parsed = bulkContactsJobSchema.safeParse(job.data);
-  if (!parsed.success || parsed.data.tenantId !== ctx.tenantId) {
-    return NextResponse.json({ error: "Job não encontrado" }, { status: 404 });
-  }
-
-  const state = await job.getState();
-  const progress = job.progress;
-
-  if (state === "failed") {
-    return NextResponse.json({
-      state,
-      progress,
-      failedReason: job.failedReason ?? null,
-    });
-  }
-
-  if (state === "completed") {
-    return NextResponse.json({
-      state,
-      progress,
-      result: job.returnvalue ?? null,
-    });
-  }
-
-  return NextResponse.json({
-    state,
-    progress,
-  });
+  return NextResponse.json(r.body);
 }

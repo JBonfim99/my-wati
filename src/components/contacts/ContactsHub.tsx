@@ -98,7 +98,7 @@ export default function ContactsHub() {
   const [modal, setModal] = useState<
     { mode: "create" } | { mode: "edit"; contact: ContactDto } | null
   >(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const [fdLabel, setFdLabel] = useState("");

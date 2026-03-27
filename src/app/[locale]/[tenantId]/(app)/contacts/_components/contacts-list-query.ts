@@ -38,7 +38,7 @@ export type ContactFilterCondition =
       id: string;
       type: "list";
       op: ListFilterOp;
-      listIds: string[];
+      listIds: number[];
     };
 
 export type ContactsListFilterState = {
@@ -168,7 +168,7 @@ export function filtersToQueryParams(f: ContactsListFilterState): {
       (c): c is Extract<ContactFilterCondition, { type: "tag" }> =>
         c.type === "tag" && Boolean(c.tagId),
     )
-    .map((c) => ({ tagId: c.tagId, op: c.op }));
+    .map((c) => ({ tagId: Number(c.tagId), op: c.op }));
 
   const systemFieldClauses: ContactSystemFieldClause[] = f.conditions
     .filter((c): c is Extract<ContactFilterCondition, { type: "field" }> => {

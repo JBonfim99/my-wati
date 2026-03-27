@@ -6,8 +6,8 @@ import { useFormatter, useTranslations } from "next-intl";
 import type { SerializedContactDto } from "@/lib/contacts/dto";
 
 export type ContactsTableSelection = {
-  selectedIds: Set<string>;
-  onToggle: (id: string) => void;
+  selectedIds: Set<number>;
+  onToggle: (id: number) => void;
   onToggleAllOnPage: () => void;
 };
 
@@ -75,7 +75,7 @@ type Props = {
   contacts: SerializedContactDto[];
   readOnly: boolean;
   onEdit: (contact: SerializedContactDto) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: number) => void;
   selection?: ContactsTableSelection;
   selectionScopeMenu?: ContactsTableSelectionScopeMenu;
 };

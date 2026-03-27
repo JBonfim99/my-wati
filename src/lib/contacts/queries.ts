@@ -22,7 +22,7 @@ import {
 
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 
-export type ContactTagDto = { id: string; name: string; slug: string };
+export type ContactTagDto = { id: number; name: string; slug: string };
 
 export type ContactCustomFieldDefDto = {
   id: string;
@@ -35,7 +35,7 @@ export type ContactCustomFieldDefDto = {
 };
 
 export type ContactRowDto = {
-  id: string;
+  id: number;
   tenantId: number;
   phoneE164: string;
   name: string | null;
@@ -46,7 +46,7 @@ export type ContactRowDto = {
   customValues: Record<string, unknown>;
 };
 
-export type ContactCursor = { updatedAt: string; id: string };
+export type ContactCursor = { updatedAt: string; id: number };
 
 export type {
   ContactCustomFilterClause,
@@ -144,14 +144,14 @@ export async function listContacts(
       .where(inArray(contactCustomValues.contactId, ids)),
   ]);
 
-  const tagByContact = new Map<string, ContactTagDto[]>();
+  const tagByContact = new Map<number, ContactTagDto[]>();
   for (const row of tagAssign) {
     const list = tagByContact.get(row.contactId) ?? [];
     list.push({ id: row.tagId, name: row.tagName, slug: row.tagSlug });
     tagByContact.set(row.contactId, list);
   }
 
-  const valuesByContact = new Map<string, Record<string, unknown>>();
+  const valuesByContact = new Map<number, Record<string, unknown>>();
   for (const row of valueRows) {
     const m = valuesByContact.get(row.contactId) ?? {};
     m[row.fieldId] = row.value;
@@ -188,7 +188,7 @@ export async function listContactIdsForFilters(
   tenantId: number,
   filters: ContactListFilters | undefined,
   maxIds: number,
-): Promise<{ ids: string[]; truncated: boolean }> {
+): Promise<{ ids: number[]; truncated: boolean }> {
   const conditions: SQL[] = [
     ...buildContactListFilterConditions(db, tenantId, filters),
   ];
@@ -211,7 +211,7 @@ export async function listContactIdsForFilters(
 export async function getContactWithDetails(
   db: AppDb,
   tenantId: number,
-  contactId: string,
+  contactId: number,
 ): Promise<ContactRowDto | null> {
   const [row] = await db
     .select()
@@ -326,7 +326,7 @@ export async function listAllTags(
     .orderBy(asc(tags.name));
 }
 
-export type ContactListSummaryDto = { id: string; name: string };
+export type ContactListSummaryDto = { id: number; name: string };
 
 export async function listContactLists(
   db: AppDb,

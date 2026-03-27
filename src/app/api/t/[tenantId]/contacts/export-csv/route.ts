@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { CONTACT_BULK_MAX_IDS } from "@/lib/contacts/contact-list-request";
+import { zEightDigitIdArray } from "@/lib/ids/eight-digit";
 import { getContactWithDetails, listContactFieldDefs } from "@/lib/contacts/queries";
 import { getDb } from "@/lib/db";
 import { contacts } from "@/lib/db/schema";
@@ -11,7 +12,7 @@ import { canWriteContacts } from "@/lib/rbac";
 type RouteCtx = { params: Promise<{ tenantId: string }> };
 
 const bodySchema = z.object({
-  ids: z.array(z.string().uuid()).min(1).max(CONTACT_BULK_MAX_IDS),
+  ids: zEightDigitIdArray.min(1).max(CONTACT_BULK_MAX_IDS),
 });
 
 function escapeCsvCell(s: string): string {

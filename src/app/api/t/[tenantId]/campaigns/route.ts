@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { syncCampaignFinishedStatus } from "@/lib/campaigns/sync-campaign-status";
+import { zEightDigitId } from "@/lib/ids/eight-digit";
 import { getDb } from "@/lib/db";
 import {
   campaigns,
@@ -14,6 +16,14 @@ import { canWriteCampaigns } from "@/lib/rbac";
 import { getCampaignQueue } from "@/lib/queues/campaign-queue";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
+
+const createCampaignBodySchema = z.object({
+  name: z.string().trim().min(1),
+  templateName: z.string().trim().min(1),
+  templateLanguage: z.string().trim().optional(),
+  listId: zEightDigitId,
+  templateComponents: z.array(z.unknown()).optional(),
+});
 
 export async function GET(_req: Request, route: RouteCtx) {
   const gate = await requireTenantContext((await route.params).tenantId);
@@ -45,20 +55,18 @@ export async function POST(req: NextRequest, route: RouteCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = (await req.json()) as {
-    name?: string;
-    templateName?: string;
-    templateLanguage?: string;
-    listId?: string;
-    templateComponents?: unknown[];
-  };
-
-  if (!body.name || !body.templateName || !body.listId) {
+  const parsedBody = createCampaignBodySchema.safeParse(await req.json());
+  if (!parsedBody.success) {
     return NextResponse.json(
-      { error: "name, templateName, listId required" },
+      {
+        error:
+          parsedBody.error.issues[0]?.message ??
+          "name, templateName, listId required",
+      },
       { status: 400 },
     );
   }
+  const body = parsedBody.data;
 
   const db = getDb();
 

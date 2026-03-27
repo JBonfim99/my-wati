@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
 import { z } from "zod";
+import { listContactListsWithMemberCounts } from "@/lib/lists/queries";
 import { getDb } from "@/lib/db";
-import {
-  contactListMembers,
-  contactLists,
-  contacts,
-} from "@/lib/db/schema";
+import { contactLists } from "@/lib/db/schema";
 import { requireTenantContext } from "@/lib/api-tenant-context";
 import { canWriteContacts } from "@/lib/rbac";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
 
 const createListSchema = z.object({
-  name: z.string().trim().min(1, "name required").max(200),
-  contactIds: z.array(z.string().uuid()).optional(),
+  name: z.string().trim().min(1, "Nome obrigatório").max(200),
 });
 
 export async function GET(_req: Request, route: RouteCtx) {
@@ -22,11 +17,15 @@ export async function GET(_req: Request, route: RouteCtx) {
   if (!gate.ok) return gate.response;
   const ctx = gate.ctx;
   const db = getDb();
-  const lists = await db
-    .select()
-    .from(contactLists)
-    .where(eq(contactLists.tenantId, ctx.tenantId));
-  return NextResponse.json({ lists });
+  const rows = await listContactListsWithMemberCounts(db, ctx.tenantId);
+  return NextResponse.json({
+    lists: rows.map((l) => ({
+      id: l.id,
+      name: l.name,
+      createdAt: l.createdAt.toISOString(),
+      memberCount: l.memberCount,
+    })),
+  });
 }
 
 export async function POST(req: NextRequest, route: RouteCtx) {
@@ -44,27 +43,31 @@ export async function POST(req: NextRequest, route: RouteCtx) {
       { status: 400 },
     );
   }
-  const { name, contactIds } = parsed.data;
+  const { name } = parsed.data;
 
   const db = getDb();
   const [list] = await db
     .insert(contactLists)
     .values({ tenantId: ctx.tenantId, name })
-    .returning();
+    .returning({
+      id: contactLists.id,
+      name: contactLists.name,
+      createdAt: contactLists.createdAt,
+    });
 
-  if (contactIds?.length && list) {
-    const valid = await db
-      .select({ id: contacts.id })
-      .from(contacts)
-      .where(and(eq(contacts.tenantId, ctx.tenantId)));
-    const allowed = new Set(valid.map((v) => v.id));
-    const rows = contactIds
-      .filter((id) => allowed.has(id))
-      .map((contactId) => ({ listId: list.id, contactId }));
-    if (rows.length) {
-      await db.insert(contactListMembers).values(rows).onConflictDoNothing();
-    }
+  if (!list) {
+    return NextResponse.json({ error: "Erro ao criar" }, { status: 500 });
   }
 
-  return NextResponse.json({ list });
+  return NextResponse.json(
+    {
+      list: {
+        id: list.id,
+        name: list.name,
+        createdAt: list.createdAt.toISOString(),
+        memberCount: 0,
+      },
+    },
+    { status: 201 },
+  );
 }

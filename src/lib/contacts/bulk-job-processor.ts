@@ -36,8 +36,8 @@ function chunk<T>(arr: T[], size: number): T[][] {
 export async function resolveValidContactIdsForTenant(
   db: AppDb,
   tenantId: number,
-  ids: string[],
-): Promise<string[]> {
+  ids: number[],
+): Promise<number[]> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return [];
   const parts = chunk(unique, CONTACT_ID_IN_CHUNK);
@@ -55,8 +55,8 @@ export async function resolveValidContactIdsForTenant(
 async function resolveValidTagIdsForTenant(
   db: AppDb,
   tenantId: number,
-  tagIds: string[],
-): Promise<string[]> {
+  tagIds: number[],
+): Promise<number[]> {
   const unique = [...new Set(tagIds)];
   if (unique.length === 0) return [];
   const parts = chunk(unique, TAG_LIST_IN_CHUNK);
@@ -74,8 +74,8 @@ async function resolveValidTagIdsForTenant(
 async function resolveValidListIdsForTenant(
   db: AppDb,
   tenantId: number,
-  listIds: string[],
-): Promise<string[]> {
+  listIds: number[],
+): Promise<number[]> {
   const unique = [...new Set(listIds)];
   if (unique.length === 0) return [];
   const parts = chunk(unique, TAG_LIST_IN_CHUNK);
@@ -178,7 +178,7 @@ export async function processBulkContactsJob(
     case "delete": {
       const parts = chunk(validContactIds, CONTACT_ID_IN_CHUNK);
       await runSequentialChunks(job, parts, "delete", async (part) => {
-        const ids = part as string[];
+        const ids = part as number[];
         await db
           .delete(contacts)
           .where(
@@ -194,7 +194,7 @@ export async function processBulkContactsJob(
         data.tagIds,
       );
       if (validTags.length === 0) break;
-      const rows: { contactId: string; tagId: string }[] = [];
+      const rows: { contactId: number; tagId: number }[] = [];
       for (const cid of validContactIds) {
         for (const tid of validTags) {
           rows.push({ contactId: cid, tagId: tid });
@@ -202,7 +202,7 @@ export async function processBulkContactsJob(
       }
       const parts = chunk(rows, INSERT_PAIR_CHUNK);
       await runSequentialChunks(job, parts, "add_tags", async (part) => {
-        const batch = part as { contactId: string; tagId: string }[];
+        const batch = part as { contactId: number; tagId: number }[];
         await db.insert(contactTags).values(batch).onConflictDoNothing();
       });
       break;
@@ -236,7 +236,7 @@ export async function processBulkContactsJob(
         data.listIds,
       );
       if (validLists.length === 0) break;
-      const rows: { listId: string; contactId: string }[] = [];
+      const rows: { listId: number; contactId: number }[] = [];
       for (const cid of validContactIds) {
         for (const lid of validLists) {
           rows.push({ listId: lid, contactId: cid });
@@ -244,7 +244,7 @@ export async function processBulkContactsJob(
       }
       const parts = chunk(rows, INSERT_PAIR_CHUNK);
       await runSequentialChunks(job, parts, "add_to_lists", async (part) => {
-        const batch = part as { listId: string; contactId: string }[];
+        const batch = part as { listId: number; contactId: number }[];
         await db.insert(contactListMembers).values(batch).onConflictDoNothing();
       });
       break;
@@ -335,7 +335,7 @@ export async function processBulkContactsJob(
       }
       const parts = chunk(validContactIds, DELETE_CV_CHUNK);
       await runSequentialChunks(job, parts, "clear_custom_field", async (part) => {
-        const ids = part as string[];
+        const ids = part as number[];
         await db
           .delete(contactCustomValues)
           .where(

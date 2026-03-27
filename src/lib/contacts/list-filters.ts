@@ -16,7 +16,7 @@ import {
 import { normalizeE164 } from "@/lib/contacts/phone";
 import type { FieldType } from "@/lib/contacts/validate-custom-value";
 
-export type ContactTagFilterClause = { tagId: string; op: "is" | "is_not" };
+export type ContactTagFilterClause = { tagId: number; op: "is" | "is_not" };
 
 export type ContactSystemFieldOp =
   | "eq"
@@ -41,7 +41,7 @@ export type ContactCustomFilterClause = {
 
 export type ContactListsFilterClause = {
   op: "in_any" | "in_all" | "in_none" | "not_in_all";
-  listIds: string[];
+  listIds: number[];
 };
 
 export type ContactListFilters = {

@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { CONTACT_BULK_MAX_IDS } from "@/lib/contacts/contact-list-request";
+import { zEightDigitIdArray } from "@/lib/ids/eight-digit";
 
-export const bulkContactIdsSchema = z
-  .array(z.string().uuid())
+export const bulkContactIdsSchema = zEightDigitIdArray
   .min(1)
   .max(CONTACT_BULK_MAX_IDS);
 
@@ -12,22 +12,22 @@ export const bulkContactsPayloadSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("add_tags"),
     ids: bulkContactIdsSchema,
-    tagIds: z.array(z.string().uuid()).min(1).max(50),
+    tagIds: zEightDigitIdArray.min(1).max(50),
   }),
   z.object({
     op: z.literal("remove_tags"),
     ids: bulkContactIdsSchema,
-    tagIds: z.array(z.string().uuid()).min(1).max(50),
+    tagIds: zEightDigitIdArray.min(1).max(50),
   }),
   z.object({
     op: z.literal("add_to_lists"),
     ids: bulkContactIdsSchema,
-    listIds: z.array(z.string().uuid()).min(1).max(50),
+    listIds: zEightDigitIdArray.min(1).max(50),
   }),
   z.object({
     op: z.literal("remove_from_lists"),
     ids: bulkContactIdsSchema,
-    listIds: z.array(z.string().uuid()).min(1).max(50),
+    listIds: zEightDigitIdArray.min(1).max(50),
   }),
   z.object({
     op: z.literal("set_custom_field"),

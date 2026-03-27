@@ -29,6 +29,7 @@ import {
   tags,
 } from "@/lib/db/schema";
 import { requireTenantContext } from "@/lib/api-tenant-context";
+import { zEightDigitIdArray } from "@/lib/ids/eight-digit";
 import { canWriteContacts } from "@/lib/rbac";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
@@ -37,7 +38,7 @@ const createContactSchema = z.object({
   phone: z.string().min(1),
   name: z.string().nullable().optional(),
   email: z.string().email().nullable().optional(),
-  tagIds: z.array(z.string().uuid()).optional(),
+  tagIds: zEightDigitIdArray.optional(),
   newTagNames: z.array(z.string()).optional(),
   customValues: z.record(z.string(), z.unknown()).optional(),
 });

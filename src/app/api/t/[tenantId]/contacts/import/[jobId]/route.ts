@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { contactsImportJobSchema } from "@/lib/contacts/import-schema";
-import { getContactsImportQueue } from "@/lib/queues/contacts-import-queue";
+import { getContactsImportJobStatusForTenant } from "@/lib/queues/contacts-job-status";
 import { requireTenantContext } from "@/lib/api-tenant-context";
 import { canWriteContacts } from "@/lib/rbac";
 
@@ -21,38 +20,10 @@ export async function GET(_req: Request, route: RouteCtx) {
     return NextResponse.json({ error: "jobId obrigatório" }, { status: 400 });
   }
 
-  const queue = getContactsImportQueue();
-  const job = await queue.getJob(jobId);
-  if (!job) {
+  const r = await getContactsImportJobStatusForTenant(jobId, ctx.tenantId);
+  if (!r.ok) {
     return NextResponse.json({ error: "Job não encontrado" }, { status: 404 });
   }
 
-  const parsed = contactsImportJobSchema.safeParse(job.data);
-  if (!parsed.success || parsed.data.tenantId !== ctx.tenantId) {
-    return NextResponse.json({ error: "Job não encontrado" }, { status: 404 });
-  }
-
-  const state = await job.getState();
-  const progress = job.progress;
-
-  if (state === "failed") {
-    return NextResponse.json({
-      state,
-      progress,
-      failedReason: job.failedReason ?? null,
-    });
-  }
-
-  if (state === "completed") {
-    return NextResponse.json({
-      state,
-      progress,
-      result: job.returnvalue ?? null,
-    });
-  }
-
-  return NextResponse.json({
-    state,
-    progress,
-  });
+  return NextResponse.json(r.body);
 }

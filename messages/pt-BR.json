@@ -359,8 +359,26 @@
     },
     "lists": {
       "title": "Listas",
-      "create": "Nova lista",
-      "name": "Nome da lista"
+      "subtitle": "Segmentos de contatos para campanhas e filtros. O tamanho de cada lista não tem limite no sistema; adicione ou remova contatos em massa a partir da área de Contatos.",
+      "create": "Criar lista",
+      "newNameLabel": "Nome da nova lista",
+      "newNamePlaceholder": "Ex.: Leads de março",
+      "saving": "Salvando…",
+      "createError": "Não foi possível criar a lista.",
+      "saveError": "Não foi possível salvar.",
+      "save": "Salvar",
+      "cancel": "Cancelar",
+      "edit": "Editar",
+      "delete": "Excluir",
+      "colName": "Nome",
+      "colMemberCount": "Contatos",
+      "colCreatedAt": "Criada em",
+      "colActions": "Ações",
+      "empty": "Nenhuma lista ainda. Crie a primeira acima.",
+      "deleteTitle": "Excluir lista?",
+      "deleteBody": "Os contatos não são apagados; apenas a lista e as associações a ela somem. Campanhas que usam esta lista podem precisar de ajuste.",
+      "deleteConfirm": "Excluir",
+      "deleting": "Excluindo…"
     },
     "templates": {
       "title": "Templates WhatsApp",

@@ -18,6 +18,7 @@ import type {
   ContactListSummaryDto,
   ContactTagDto,
 } from "@/lib/contacts/queries";
+import { awaitContactsJobSse } from "@/lib/contacts/contacts-job-sse-client";
 import { validateAndNormalizeCustomValue } from "@/lib/contacts/validate-custom-value";
 import type { FieldType } from "@/lib/contacts/validate-custom-value";
 import type { ContactCustomFieldConfig } from "@/lib/db/schema";
@@ -103,7 +104,7 @@ export function ContactsPageClient({
   const [totalCount, setTotalCount] = useState(initialTotal);
   const [organizationTotal, setOrganizationTotal] = useState(initialTotal);
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(
     () => new Set(),
   );
   const [idsFetchLoading, setIdsFetchLoading] = useState(false);
@@ -170,33 +171,14 @@ export function ContactsPageClient({
     | { kind: "failed"; reason: string | null }
     | { kind: "timeout" };
 
-  const pollBulkJobUntilDone = useCallback(
+  const waitBulkJobSse = useCallback(
     async (jobId: string): Promise<BulkPollOutcome> => {
-      const url = `${bulkApi}/${encodeURIComponent(jobId)}`;
-      const deadline = Date.now() + 180_000;
-      let nextWaitMs = 1200;
-      const maxWaitMs = 5000;
-      while (Date.now() < deadline) {
-        const res = await fetch(url);
-        if (!res.ok) {
-          return { kind: "failed", reason: t("bulkJobStatusError") };
-        }
-        const j = (await res.json()) as {
-          state: string;
-          failedReason?: string | null;
-          result?: BulkJobResultPayload | null;
-        };
-        if (j.state === "completed") {
-          return { kind: "completed", result: j.result ?? null };
-        }
-        if (j.state === "failed") {
-          return { kind: "failed", reason: j.failedReason ?? null };
-        }
-        const w = nextWaitMs;
-        nextWaitMs = Math.min(maxWaitMs, Math.round(nextWaitMs * 1.5));
-        await new Promise((r) => setTimeout(r, w));
-      }
-      return { kind: "timeout" };
+      const url = `${bulkApi}/${encodeURIComponent(jobId)}/stream`;
+      const o = await awaitContactsJobSse({
+        url,
+        statusErrorMessage: t("bulkJobStatusError"),
+      });
+      return o as BulkPollOutcome;
     },
     [bulkApi, t],
   );
@@ -217,7 +199,7 @@ export function ContactsPageClient({
     | { mode: "edit"; contact: SerializedContactDto }
     | null
   >(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -334,7 +316,7 @@ export function ContactsPageClient({
         setBulkOpBusy(false);
         return false;
       }
-      const outcome = await pollBulkJobUntilDone(queued.jobId);
+      const outcome = await waitBulkJobSse(queued.jobId);
       setBulkOpBusy(false);
       setBulkExtra(null);
       await refreshFirstPage();
@@ -350,7 +332,7 @@ export function ContactsPageClient({
     },
     [
       bulkApi,
-      pollBulkJobUntilDone,
+      waitBulkJobSse,
       refreshFirstPage,
       showBulkError,
       showBulkSuccess,
@@ -415,7 +397,7 @@ export function ContactsPageClient({
     setIdsFetchLoading(false);
     if (!res.ok) return;
     const j = (await res.json()) as {
-      ids: string[];
+      ids: number[];
       truncated: boolean;
       cap: number;
     };
@@ -427,7 +409,7 @@ export function ContactsPageClient({
     }
   }
 
-  function toggleSelected(id: string) {
+  function toggleSelected(id: number) {
     setSelectionNotice(null);
     setSelectedIds((prev) => {
       const n = new Set(prev);
@@ -532,7 +514,7 @@ export function ContactsPageClient({
       setBulkBusy(false);
       return;
     }
-    const outcome = await pollBulkJobUntilDone(queued.jobId);
+    const outcome = await waitBulkJobSse(queued.jobId);
     setBulkBusy(false);
     setBulkDeleteOpen(false);
     setSelectedIds(new Set());
@@ -634,7 +616,7 @@ export function ContactsPageClient({
     if (ids.length === 0 || !bulkExtra) return;
 
     if (bulkExtra.kind === "add_tags" || bulkExtra.kind === "remove_tags") {
-      const tagIds = [...bulkTagPick];
+      const tagIds = [...bulkTagPick].map((id) => Number(id));
       if (tagIds.length === 0) return;
       await runQueuedBulkOp(
         bulkExtra.kind === "add_tags"
@@ -648,7 +630,7 @@ export function ContactsPageClient({
     }
 
     if (bulkExtra.kind === "add_lists" || bulkExtra.kind === "remove_lists") {
-      const listIds = [...bulkListPick];
+      const listIds = [...bulkListPick].map((id) => Number(id));
       if (listIds.length === 0) return;
       await runQueuedBulkOp(
         bulkExtra.kind === "add_lists"
@@ -992,7 +974,10 @@ export function ContactsPageClient({
                 ) : (
                   <BulkTagSearchField
                     key={bulkExtra.kind}
-                    tags={sortedTagsForModal}
+                    tags={sortedTagsForModal.map((t) => ({
+                      id: String(t.id),
+                      name: t.name,
+                    }))}
                     selectedIds={bulkTagPick}
                     onAdd={addBulkTagPick}
                     onRemove={removeBulkTagPick}
@@ -1017,7 +1002,10 @@ export function ContactsPageClient({
                   <BulkTagSearchField
                     key={bulkExtra.kind}
                     variant="lists"
-                    tags={sortedListsForModal}
+                    tags={sortedListsForModal.map((l) => ({
+                      id: String(l.id),
+                      name: l.name,
+                    }))}
                     selectedIds={bulkListPick}
                     onAdd={addBulkListPick}
                     onRemove={removeBulkListPick}

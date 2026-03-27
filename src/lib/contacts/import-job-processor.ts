@@ -7,7 +7,7 @@ import {
   type ContactImportColumnMapping,
   type ContactsImportJob,
 } from "@/lib/contacts/import-schema";
-import { normalizeE164 } from "@/lib/contacts/phone";
+import { normalizePhoneForCsvImport } from "@/lib/contacts/phone";
 import { sameNormalizedCustomValue } from "@/lib/contacts/same-normalized-custom-value";
 import { validateAndNormalizeCustomValue } from "@/lib/contacts/validate-custom-value";
 import type { FieldType } from "@/lib/contacts/validate-custom-value";
@@ -129,7 +129,7 @@ function prepareRow(
     }
   });
 
-  const phoneE164 = normalizeE164(phoneRaw);
+  const phoneE164 = normalizePhoneForCsvImport(phoneRaw);
   if (!phoneE164) return null;
 
   return { phoneE164, name, email, custom };
@@ -178,7 +178,7 @@ export async function processContactsImportJob(
   }
 
   const tagUnique = [...new Set(data.tagIds)];
-  let validTagIds: string[] = [];
+  let validTagIds: number[] = [];
   if (tagUnique.length > 0) {
     const tagRows = await db
       .select({ id: tags.id })
@@ -257,7 +257,7 @@ export async function processContactsImportJob(
       const phoneToId = new Map(idRows.map((x) => [x.phoneE164, x.id]));
 
       if (validTagIds.length > 0) {
-        const tagPairs: { contactId: string; tagId: string }[] = [];
+        const tagPairs: { contactId: number; tagId: number }[] = [];
         for (const r of uniqueRows) {
           const cid = phoneToId.get(r.phoneE164);
           if (!cid) continue;
@@ -272,7 +272,7 @@ export async function processContactsImportJob(
       }
 
       const cvRows: {
-        contactId: string;
+        contactId: number;
         fieldId: string;
         value: unknown;
         updatedAt: Date;

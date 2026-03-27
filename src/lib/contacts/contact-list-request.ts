@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { zEightDigitId, zEightDigitIdArray } from "@/lib/ids/eight-digit";
 import { resolveCustomClausesFromApi } from "@/lib/contacts/list-filters";
 import type { ContactListFilters } from "@/lib/contacts/list-filters";
 import type { ContactCustomFieldDefDto } from "@/lib/contacts/queries";
@@ -16,7 +17,7 @@ const LIST_CLAUSES_MAX = 8;
 
 const listClauseItemSchema = z.object({
   op: z.enum(["in_any", "in_all", "in_none", "not_in_all"]),
-  listIds: z.array(z.string().uuid()).min(1).max(LIST_FILTER_MAX),
+  listIds: zEightDigitIdArray.min(1).max(LIST_FILTER_MAX),
 });
 
 const listClausesQuerySchema = z
@@ -53,7 +54,7 @@ const systemFieldClausesQuerySchema = z
   .max(FIELD_CLAUSES_MAX);
 
 const tagClauseSchema = z.object({
-  tagId: z.string().uuid(),
+  tagId: zEightDigitId,
   op: z.enum(["is", "is_not"]),
 });
 
