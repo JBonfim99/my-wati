@@ -2,7 +2,6 @@
 
 import { useTranslations } from "next-intl";
 import {
-  ArrowRight,
   Camera,
   ChevronLeft,
   ExternalLink,
@@ -12,6 +11,7 @@ import {
   Paperclip,
   Phone,
   Plus,
+  Reply,
   Smile,
 } from "lucide-react";
 import type { TemplatePreviewModel } from "@/lib/meta/template-preview-model";
@@ -131,11 +131,12 @@ export function WhatsAppTemplatePhonePreview({ model, businessName = "my-wati" }
   });
 
   const hasButtons = model.buttons.length > 0;
+  const hasFooter = model.footer.trim().length > 0;
 
   return (
     <div className="mx-auto w-full max-w-[300px] shrink-0">
       <div className="overflow-hidden rounded-[2.25rem] border-[10px] border-zinc-900 bg-zinc-900 shadow-2xl">
-        <div className="flex min-h-[480px] flex-col bg-[#efeae2]">
+        <div className="flex h-[640px] flex-col bg-[#efeae2]">
           {/* Status + chat bar */}
           <div className="shrink-0 bg-white">
             <div className="flex h-7 items-center justify-end px-3 pt-1">
@@ -177,70 +178,95 @@ export function WhatsAppTemplatePhonePreview({ model, businessName = "my-wati" }
             </div>
           </div>
 
-          {/* Chat area */}
-          <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-2 py-3">
-            <p className="rounded-lg bg-[#DBF2F1] px-2.5 py-2 text-[11px] leading-snug text-[#607372]">
+          {/* Chat area: altura fixa no telefone; só esta região rola. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden px-2 py-3">
+            <p className="shrink-0 rounded-lg bg-[#DBF2F1] px-2.5 py-2 text-[11px] leading-snug text-[#607372]">
               {t("view.previewDisclaimer")}
             </p>
 
-            <div className="rounded-lg bg-white px-2.5 pb-2 pt-2.5 shadow-sm ring-1 ring-black/[0.06]">
-              {model.header.kind === "text" && (
-                <div className="mb-2 text-center text-[15px] font-semibold leading-snug text-[#111b21]">
-                  {model.header.text}
-                </div>
-              )}
-              {model.header.kind === "image" && (
-                <HeaderMediaPlaceholder label="Imagem" />
-              )}
-              {model.header.kind === "video" && (
-                <HeaderMediaPlaceholder label="Vídeo" />
-              )}
-              {model.header.kind === "document" && (
-                <HeaderMediaPlaceholder label="Documento" />
-              )}
-
-              <div className="rounded-md bg-[#dcf8c6] px-2 py-1.5 text-[14px] leading-snug text-[#111b21]">
-                {model.body.trim() ? (
-                  <WhatsAppMdPreview text={model.body} />
-                ) : (
-                  <span className="text-zinc-400">—</span>
+            {/* Bolha única: fundo branco homogêneo; divisor só acima dos botões. */}
+            <div className="shrink-0 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-black/[0.06]">
+              <div
+                className={`px-2.5 pt-2.5 ${!hasFooter && !hasButtons ? "pb-2.5" : ""}`}
+              >
+                {model.header.kind === "text" && (
+                  <div className="mb-2 text-left text-[15px] font-semibold leading-snug text-[#111b21]">
+                    {model.header.text}
+                  </div>
                 )}
+                {model.header.kind === "image" &&
+                  (model.header.src ? (
+                    <div className="mb-1">
+                      {model.header.variable ? (
+                        <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                          {t("view.previewImageApprovalSample")}
+                        </p>
+                      ) : null}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={model.header.src}
+                        alt=""
+                        className="max-h-[200px] w-full rounded-lg border border-black/10 object-cover"
+                      />
+                    </div>
+                  ) : model.header.variable ? (
+                    <HeaderMediaPlaceholder
+                      label={t("view.previewImageVariable")}
+                    />
+                  ) : (
+                    <HeaderMediaPlaceholder label={t("view.previewImage")} />
+                  ))}
+                {model.header.kind === "video" && (
+                  <HeaderMediaPlaceholder label="Vídeo" />
+                )}
+                {model.header.kind === "document" && (
+                  <HeaderMediaPlaceholder label="Documento" />
+                )}
+
+                <div className="px-0 py-1 text-[14px] leading-snug text-[#111b21]">
+                  {model.body.trim() ? (
+                    <WhatsAppMdPreview text={model.body} />
+                  ) : (
+                    <span className="text-zinc-400">—</span>
+                  )}
+                </div>
               </div>
 
-              <div
-                className={`mt-2 flex items-end gap-2 border-t border-black/[0.06] pt-2 text-[12px] text-[#667781] ${
-                  model.footer.trim() ? "justify-between" : "justify-end"
-                }`}
-              >
-                {model.footer.trim() ? (
+              {hasFooter ? (
+                <div className="mt-2 flex items-end justify-between gap-2 px-2.5 pb-2 pt-1 text-[12px] text-[#667781]">
                   <span className="min-w-0 flex-1 leading-snug">
                     {model.footer.trim()}
                   </span>
-                ) : null}
-                <time
-                  className="shrink-0 tabular-nums text-[11px] text-[#667781]/90"
-                  dateTime={now.toISOString()}
-                >
-                  {timeLabel}
-                </time>
-              </div>
+                  <time
+                    className="shrink-0 tabular-nums text-[11px] text-[#667781]/90"
+                    dateTime={now.toISOString()}
+                  >
+                    {timeLabel}
+                  </time>
+                </div>
+              ) : null}
 
-              {hasButtons && (
+              {hasButtons ? (
                 <div
-                  className="preview-message__callAction-buttons mt-2 flex flex-col gap-2 border-t border-[#E9EDEF] pt-2"
+                  className="preview-message__callAction-buttons border-t border-[#E9EDEF]"
                   data-testid="messageTemplate-addTemplateModal-preview-callAction-buttons"
                 >
                   {model.buttons.map((b, i) => {
-                    const ctaShell =
-                      "preview-message__callAction-button flex cursor-default items-center justify-center gap-2 rounded-lg border border-[#D1D7DB] bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.04)]";
+                    const row =
+                      "preview-message__callAction-button flex w-full cursor-default items-center justify-center gap-2 px-3 py-[11px] text-[15px] font-medium leading-tight text-[#027EB5] antialiased";
+                    const divider = i > 0 ? "border-t border-[#E9EDEF]" : "";
                     if (b.kind === "url") {
                       return (
                         <div
                           key={`cta-${i}`}
-                          className={`${ctaShell} preview-message__callAction-button_url text-center text-[14px] font-semibold leading-tight text-[#008069]`}
+                          className={`${row} ${divider} preview-message__callAction-button_url`}
                           data-testid="messageTemplate-addTemplateModal-preview-calltoAction-button"
                         >
-                          <ExternalLink className="size-4 shrink-0 opacity-90" aria-hidden />
+                          <ExternalLink
+                            className="size-[18px] shrink-0"
+                            strokeWidth={2}
+                            aria-hidden
+                          />
                           <span className="min-w-0 truncate">{b.text}</span>
                         </div>
                       );
@@ -248,23 +274,20 @@ export function WhatsAppTemplatePhonePreview({ model, businessName = "my-wati" }
                     return (
                       <div
                         key={`qr-${i}`}
-                        className={`${ctaShell} preview-message__callAction-button_reply`}
+                        className={`${row} ${divider} preview-message__callAction-button_reply`}
                         data-testid="messageTemplate-addTemplateModal-preview-quickReply-button"
                       >
-                        <ArrowRight className="size-4 shrink-0 text-[#008069] opacity-90" aria-hidden />
-                        <div className="flex min-w-0 flex-1 flex-col items-center gap-0.5 text-center">
-                          <span className="min-w-0 truncate text-[14px] font-semibold leading-tight text-[#008069]">
-                            {b.text}
-                          </span>
-                          <span className="text-[11px] font-medium leading-tight text-[#667781]">
-                            {t("view.previewQuickReplyCaption")}
-                          </span>
-                        </div>
+                        <Reply
+                          className="size-[18px] shrink-0"
+                          strokeWidth={2}
+                          aria-hidden
+                        />
+                        <span className="min-w-0 truncate">{b.text}</span>
                       </div>
                     );
                   })}
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 

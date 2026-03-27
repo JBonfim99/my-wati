@@ -7,7 +7,7 @@ import type { TemplateFormState } from "@/lib/meta/template-create-payload";
 export type PreviewHeader =
   | { kind: "none" }
   | { kind: "text"; text: string }
-  | { kind: "image" }
+  | { kind: "image"; src?: string; variable?: boolean }
   | { kind: "video" }
   | { kind: "document" };
 
@@ -86,7 +86,15 @@ export function parseTemplatePreviewModel(
       if (fmt === "TEXT" && typeof text === "string" && text.trim()) {
         out.header = { kind: "text", text: text.trim() };
       } else if (fmt === "IMAGE") {
-        out.header = { kind: "image" };
+        const ex = (c as { example?: { header_url?: unknown } }).example
+          ?.header_url;
+        const u =
+          Array.isArray(ex) && typeof ex[0] === "string" ? ex[0].trim() : "";
+        out.header = {
+          kind: "image",
+          variable: false,
+          ...(u ? { src: u } : {}),
+        };
       } else if (fmt === "VIDEO") {
         out.header = { kind: "video" };
       } else if (fmt === "DOCUMENT") {
@@ -150,13 +158,28 @@ export function applySamplesToTemplatePreviewModel(
     };
   });
 
-  const header =
+  let header: PreviewHeader =
     model.header.kind === "text"
       ? {
-          kind: "text" as const,
+          kind: "text",
           text: resolveHeaderText(model.header.text, state),
         }
       : model.header;
+
+  if (model.header.kind === "image" && state.headerKind === "image") {
+    const vn =
+      state.headerImageBinding === "variable" &&
+      state.parameterFormat === "named"
+        ? state.headerImageUrlVariableName.trim()
+        : "";
+    const fromSample = vn ? (state.samples[vn] ?? "").trim() : "";
+    const src = fromSample || state.headerImageSampleUrl.trim();
+    header = {
+      kind: "image",
+      variable: state.headerImageBinding === "variable",
+      ...(src ? { src } : {}),
+    };
+  }
 
   return {
     header,

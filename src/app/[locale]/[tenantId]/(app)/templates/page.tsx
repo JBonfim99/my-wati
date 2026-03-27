@@ -10,16 +10,14 @@ import {
 import type { MessageTemplateRecord } from "@/lib/meta/graph";
 import { canManageIntegration, canWriteCampaigns } from "@/lib/rbac";
 import { listMessageTemplateDrafts } from "@/lib/templates/template-draft-queries";
+import {
+  defaultTemplatesListFilters,
+  filterTemplatesList,
+  mergeTemplatesSorted,
+  sliceTemplatesPage,
+  TEMPLATES_LIST_PAGE_SIZE,
+} from "@/lib/templates/template-list-query";
 import { TemplatesPageClient } from "./_components/TemplatesPageClient";
-
-function templateUpdatedMs(t: MessageTemplateRecord): number {
-  const raw = t.last_updated_time;
-  const n = Number(raw);
-  if (Number.isNaN(n)) return 0;
-  if (n > 1e12) return n;
-  if (n > 1e8) return n * 1000;
-  return 0;
-}
 
 export default async function TemplatesPage({
   params,
@@ -68,14 +66,17 @@ export default async function TemplatesPage({
     payload: r.payload as Record<string, unknown>,
   }));
 
-  const mergedTemplates = [...metaTemplates, ...draftRecords].sort(
-    (a, b) => templateUpdatedMs(b) - templateUpdatedMs(a),
-  );
+  const merged = mergeTemplatesSorted(metaTemplates, draftRecords);
+  const filtered = filterTemplatesList(merged, defaultTemplatesListFilters());
+  const { page: initialPage, nextCursor: initialNextCursor, total: initialTotal } =
+    sliceTemplatesPage(filtered, 0, TEMPLATES_LIST_PAGE_SIZE);
 
   return (
     <TemplatesPageClient
       tenantId={String(ctx.tenantId)}
-      initialTemplates={mergedTemplates}
+      initialTemplates={initialPage}
+      initialNextCursor={initialNextCursor}
+      initialTotal={initialTotal}
       initialDraftSnapshots={initialDraftSnapshots}
       initialError={initialError}
       integrationConfigured={integrationConfigured}

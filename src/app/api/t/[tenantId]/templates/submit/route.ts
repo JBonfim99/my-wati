@@ -13,9 +13,11 @@ import {
   slugifyTemplateName,
 } from "@/lib/meta/template-components";
 import {
+  insertHeaderComponentAfterBody,
   parseTemplateFormPayload,
   validateForMetaSubmit,
 } from "@/lib/meta/template-create-payload";
+import { uploadWhatsAppTemplateHeaderImageFromUrl } from "@/lib/meta/whatsapp-template-header-upload";
 import { deleteMessageTemplateDraft } from "@/lib/templates/template-draft-queries";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
@@ -53,6 +55,7 @@ export async function POST(req: NextRequest, route: RouteCtx) {
   let components: unknown[];
   let parameter_format: string | undefined;
   let draftIdToDelete: string | undefined;
+  let headerImageUrlToUpload: string | undefined;
 
   if (formParsed.success) {
     draftIdToDelete = formParsed.data.draftId;
@@ -72,6 +75,7 @@ export async function POST(req: NextRequest, route: RouteCtx) {
     category = normalizeTemplateCategoryForWrite(v.payload.category);
     components = v.payload.components;
     parameter_format = v.payload.parameter_format;
+    headerImageUrlToUpload = v.headerImageUrlToUpload?.trim();
   } else {
     const legParsed = legacyBodySchema.safeParse(raw);
     if (!legParsed.success) {
@@ -103,6 +107,43 @@ export async function POST(req: NextRequest, route: RouteCtx) {
     return NextResponse.json({ error: meta.error }, { status: meta.status });
   }
 
+  const { accessToken, businessAccountId, graphApiVersion } =
+    meta.integration;
+
+  if (headerImageUrlToUpload) {
+    const appId = process.env.META_APP_ID?.trim();
+    if (!appId) {
+      return NextResponse.json(
+        {
+          error:
+            "Cabeçalho em imagem exige upload na Meta. Defina META_APP_ID no servidor (ID numérico do app em developers.facebook.com → Configurações → Básico).",
+          issues: [
+            "Defina a variável de ambiente META_APP_ID e faça o deploy de novo.",
+          ],
+        },
+        { status: 422 },
+      );
+    }
+    const up = await uploadWhatsAppTemplateHeaderImageFromUrl({
+      accessToken,
+      graphVersion: graphApiVersion,
+      appId,
+      imageUrl: headerImageUrlToUpload,
+    });
+    if (!up.ok) {
+      return NextResponse.json(
+        { error: up.error, issues: [up.error] },
+        { status: 422 },
+      );
+    }
+    const headerComp = {
+      type: "HEADER",
+      format: "IMAGE",
+      example: { header_handle: [up.handle] },
+    };
+    components = insertHeaderComponentAfterBody(components, headerComp);
+  }
+
   const hasBody = components.some(
     (c) =>
       typeof c === "object" &&
@@ -119,9 +160,6 @@ export async function POST(req: NextRequest, route: RouteCtx) {
     );
   }
 
-  const { accessToken, businessAccountId, graphApiVersion } =
-    meta.integration;
-
   const result = await createMessageTemplateOnWaba(
     accessToken,
     businessAccountId,
@@ -137,7 +175,14 @@ export async function POST(req: NextRequest, route: RouteCtx) {
   );
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 502 });
+    return NextResponse.json(
+      {
+        error: result.error,
+        issues: [result.error],
+        errorCode: result.errorCode,
+      },
+      { status: 422 },
+    );
   }
 
   if (draftIdToDelete) {

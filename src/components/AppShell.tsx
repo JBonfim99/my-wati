@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useTranslations } from "next-intl";
 import { AppNav } from "@/components/AppNav";
+import { ToastProvider } from "@/components/ToastProvider";
 import type { TenantOption } from "@/components/TenantSelector";
 import { TenantSwitchOverlay } from "@/components/TenantSwitchOverlay";
 import { Menu, X } from "lucide-react";
@@ -33,6 +34,7 @@ export function AppShell({
   }, []);
 
   return (
+    <ToastProvider>
     <div className="flex min-h-screen flex-col bg-page lg:h-screen lg:flex-row lg:overflow-hidden">
       <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-sidebar px-4 shadow-sm lg:hidden">
         <span className="font-display text-base font-bold tracking-tight text-fg">
@@ -89,5 +91,6 @@ export function AppShell({
         onDone={endTenantSwitch}
       />
     </div>
+    </ToastProvider>
   );
 }

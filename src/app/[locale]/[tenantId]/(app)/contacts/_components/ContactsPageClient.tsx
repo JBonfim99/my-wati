@@ -47,6 +47,7 @@ import { BulkCustomValueInput } from "./BulkCustomValueInput";
 import { BulkListPickField } from "./BulkListPickField";
 import { BulkTagSearchField } from "./BulkTagSearchField";
 import { ContactImportWizard } from "./ContactImportWizard";
+import { TenantFixedFieldsPanel } from "./TenantFixedFieldsPanel";
 
 type Props = {
   tenantId: string;
@@ -897,12 +898,15 @@ export function ContactsPageClient({
           ) : null}
         </>
       ) : (
-        <FieldDefinitionsPanel
-          tenantId={tenantId}
-          readOnly={readOnly}
-          refreshTrigger={fieldDefsRefresh}
-          onUpdated={() => void reloadFieldDefs()}
-        />
+        <div className="space-y-10">
+          <FieldDefinitionsPanel
+            tenantId={tenantId}
+            readOnly={readOnly}
+            refreshTrigger={fieldDefsRefresh}
+            onUpdated={() => void reloadFieldDefs()}
+          />
+          <TenantFixedFieldsPanel tenantId={tenantId} readOnly={readOnly} />
+        </div>
       )}
 
       <ContactFormModal

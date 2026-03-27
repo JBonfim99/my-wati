@@ -14,9 +14,12 @@ import {
 
 export const DB_TEMPLATE_DRAFT_STATUS = "DB_DRAFT" as const;
 
-export const TEMPLATE_FORM_SCHEMA_VERSION = 1;
+export const TEMPLATE_FORM_SCHEMA_VERSION = 2;
 
 export type ParameterFormatChoice = "named" | "positional";
+
+/** Só para `headerKind === "image"`: URL fixa na prévia ou mídia trocada a cada envio. */
+export type HeaderImageBinding = "fixed" | "variable";
 
 export type DraftButton =
   | { id: string; kind: "url"; text: string; url: string }
@@ -28,8 +31,16 @@ export type TemplateFormState = {
   language: string;
   category: "MARKETING" | "UTILITY" | "AUTHENTICATION";
   parameterFormat: ParameterFormatChoice;
-  headerKind: "none" | "text";
+  headerKind: "none" | "text" | "image";
   headerText: string;
+  /** URL HTTPS de exemplo para aprovação na Meta (sempre necessária no cabeçalho IMAGE). */
+  headerImageSampleUrl: string;
+  headerImageBinding: HeaderImageBinding;
+  /**
+   * Só com `headerImageBinding === "variable"`: nome do parâmetro da URL da imagem
+   * (ex.: banner_url) — usado no envio; o exemplo continua em `headerImageSampleUrl` / samples.
+   */
+  headerImageUrlVariableName: string;
   body: string;
   footer: string;
   buttonsEnabled: boolean;
@@ -67,6 +78,9 @@ export function defaultTemplateFormState(): TemplateFormState {
     parameterFormat: "named",
     headerKind: "none",
     headerText: "",
+    headerImageSampleUrl: "",
+    headerImageBinding: "fixed",
+    headerImageUrlVariableName: "",
     body: "",
     footer: "",
     buttonsEnabled: false,
@@ -130,8 +144,24 @@ export function parseTemplateFormPayload(raw: unknown): TemplateFormState {
     language: typeof o.language === "string" ? o.language : base.language,
     category,
     parameterFormat: pf,
-    headerKind: o.headerKind === "text" ? "text" : "none",
+    headerKind:
+      o.headerKind === "text"
+        ? "text"
+        : o.headerKind === "image"
+          ? "image"
+          : "none",
     headerText: typeof o.headerText === "string" ? o.headerText : "",
+    headerImageSampleUrl:
+      typeof o.headerImageSampleUrl === "string" ? o.headerImageSampleUrl : "",
+    headerImageBinding: (() => {
+      const v = o.headerImageBinding === "variable" ? "variable" : "fixed";
+      if (pf === "positional" && v === "variable") return "fixed";
+      return v;
+    })(),
+    headerImageUrlVariableName:
+      typeof o.headerImageUrlVariableName === "string"
+        ? o.headerImageUrlVariableName
+        : "",
     body: typeof o.body === "string" ? o.body : "",
     footer: typeof o.footer === "string" ? o.footer : "",
     buttonsEnabled: Boolean(o.buttonsEnabled),
@@ -218,11 +248,59 @@ function urlPositionalToMetaSingle(url: string, digit: string): string {
   return url.replace(/\{\{\d+\}\}/g, `{{${digit}}}`);
 }
 
+export type TenantFixedFieldHint = { key: string; label: string };
+
+/** Texto onde aparecem placeholders nomeados (corpo, cabeçalho texto, URLs). */
+export function templateBlobForNamedPlaceholders(state: TemplateFormState): string {
+  let s = state.body;
+  if (state.headerKind === "text") s += `\n${state.headerText}`;
+  if (state.headerKind === "image" && state.headerImageBinding === "variable") {
+    const vn = state.headerImageUrlVariableName.trim();
+    if (vn) s += `\n{{${vn}}}`;
+  }
+  for (const b of state.buttons) {
+    if (b.kind === "url") s += `\n${b.url}`;
+  }
+  return s;
+}
+
+export type TenantFixedSampleSource = { key: string; value: string };
+
+/** Preenche `samples` com valores fixos da organização quando o placeholder aparece no modelo e o exemplo ainda está vazio. */
+export function mergeTenantFixedSamplesIntoFormState(
+  state: TemplateFormState,
+  fixed: TenantFixedSampleSource[],
+): TemplateFormState {
+  if (!fixed.length) return state;
+  const map = new Map(
+    fixed.map((f) => [f.key.trim().toLowerCase(), f.value] as const),
+  );
+  const names = new Set(
+    extractNamedPlaceholders(templateBlobForNamedPlaceholders(state)),
+  );
+  const samples = { ...state.samples };
+  let changed = false;
+  for (const n of names) {
+    const v = map.get(n.toLowerCase());
+    if (v === undefined) continue;
+    if ((samples[n] ?? "").trim()) continue;
+    samples[n] = v;
+    changed = true;
+  }
+  return changed ? { ...state, samples } : state;
+}
+
 /** Campos de exemplo exigidos pela Meta (corpo, cabeçalho, sufixo de URL dinâmica). */
-export function getSampleFieldDescriptors(state: TemplateFormState): {
+export function getSampleFieldDescriptors(
+  state: TemplateFormState,
+  tenantFixed?: TenantFixedFieldHint[],
+): {
   sampleKey: string;
   hint: string;
 }[] {
+  const tfMap = new Map(
+    (tenantFixed ?? []).map((t) => [t.key.trim().toLowerCase(), t.label] as const),
+  );
   const out: { sampleKey: string; hint: string }[] = [];
   const push = (k: string, h: string) => {
     const existing = out.find((x) => x.sampleKey === k);
@@ -235,18 +313,39 @@ export function getSampleFieldDescriptors(state: TemplateFormState): {
     out.push({ sampleKey: k, hint: h });
   };
   const pf = state.parameterFormat;
+  const headerNamedBlob =
+    state.headerKind === "text" ? state.headerText : "";
   if (pf === "named") {
     for (const n of extractNamedPlaceholders(state.body)) {
-      push(n, `Corpo {{${n}}}`);
+      const tl = tfMap.get(n.toLowerCase());
+      push(n, tl ? `Organização «${tl}» (fixo) · corpo {{${n}}}` : `Corpo {{${n}}}`);
     }
-    for (const n of extractNamedPlaceholders(state.headerText)) {
-      push(`header_${n}`, `Cabeçalho {{${n}}}`);
+    for (const n of extractNamedPlaceholders(headerNamedBlob)) {
+      const tl = tfMap.get(n.toLowerCase());
+      push(
+        `header_${n}`,
+        tl
+          ? `Organização «${tl}» (fixo) · cabeçalho {{${n}}}`
+          : `Cabeçalho {{${n}}}`,
+      );
+    }
+    if (state.headerKind === "image" && state.headerImageBinding === "variable") {
+      const vn = state.headerImageUrlVariableName.trim();
+      if (vn) {
+        const tl = tfMap.get(vn.toLowerCase());
+        push(
+          vn,
+          tl
+            ? `Organização «${tl}» (fixo) · URL da imagem do cabeçalho ({{${vn}}})`
+            : `URL da imagem do cabeçalho — parâmetro {{${vn}}}`,
+        );
+      }
     }
   } else {
     for (const n of extractPositionalPlaceholders(state.body)) {
       push(`p${n}`, `Corpo {{${n}}}`);
     }
-    for (const n of extractPositionalPlaceholders(state.headerText)) {
+    for (const n of extractPositionalPlaceholders(headerNamedBlob)) {
       push(`header_p${n}`, `Cabeçalho {{${n}}}`);
     }
   }
@@ -256,7 +355,13 @@ export function getSampleFieldDescriptors(state: TemplateFormState): {
     const u = normalizeUrlWithHttps(b.url);
     if (pf === "named") {
       for (const n of extractNamedPlaceholders(u)) {
-        push(n, `URL (botão): {{${n}}}`);
+        const tl = tfMap.get(n.toLowerCase());
+        push(
+          n,
+          tl
+            ? `Organização «${tl}» (fixo) · URL (botão) {{${n}}}`
+            : `URL (botão): {{${n}}}`,
+        );
       }
     } else {
       for (const n of extractPositionalPlaceholders(u)) {
@@ -345,7 +450,7 @@ function buildBodyComponent(
     : { type: "BODY", text };
 }
 
-function buildHeaderComponent(
+function buildTextHeaderComponent(
   state: TemplateFormState,
   issues: string[],
 ): unknown | null {
@@ -409,6 +514,88 @@ function buildHeaderComponent(
     };
   }
   return { type: "HEADER", format: "TEXT", text };
+}
+
+export function isValidTemplateImageSampleUrl(raw: string): boolean {
+  const t = raw.trim();
+  if (t.length < 10 || t.length > 2048) return false;
+  let u: URL;
+  try {
+    u = new URL(t);
+  } catch {
+    return false;
+  }
+  return u.protocol === "https:";
+}
+
+type MetaHeaderBuild =
+  | { mode: "none" }
+  | { mode: "component"; component: unknown }
+  /** A Meta só aceita `header_handle` (upload reenviável); o servidor baixa esta URL e faz upload. */
+  | { mode: "pending"; url: string }
+  | { mode: "fail" };
+
+function buildHeaderForMetaSubmit(
+  state: TemplateFormState,
+  issues: string[],
+): MetaHeaderBuild {
+  if (state.headerKind === "none") return { mode: "none" };
+  if (state.headerKind === "image") {
+    const url = state.headerImageSampleUrl.trim();
+    if (!url) {
+      issues.push("Informe a URL HTTPS da imagem de exemplo para a Meta.");
+      return { mode: "fail" };
+    }
+    if (!isValidTemplateImageSampleUrl(url)) {
+      issues.push("A URL da imagem de exemplo deve ser HTTPS pública.");
+      return { mode: "fail" };
+    }
+    if (state.headerImageBinding === "variable") {
+      if (state.parameterFormat !== "named") {
+        issues.push(
+          "Imagem variável no cabeçalho só é permitida com parâmetros nomeados ({{nome}}) no modelo.",
+        );
+        return { mode: "fail" };
+      }
+      const vn = state.headerImageUrlVariableName.trim();
+      if (!vn) {
+        issues.push("Informe o nome da variável da URL da imagem (ex.: banner_url).");
+        return { mode: "fail" };
+      }
+      if (!isValidNamedTemplatePlaceholderName(vn)) {
+        issues.push(
+          "Nome da variável da imagem inválido: use letra minúscula inicial, depois a-z, 0-9 e _.",
+        );
+        return { mode: "fail" };
+      }
+    }
+    return { mode: "pending", url };
+  }
+  const comp = buildTextHeaderComponent(state, issues);
+  if (!comp) {
+    if (state.headerKind === "text" && state.headerText.trim()) {
+      return { mode: "fail" };
+    }
+    return { mode: "none" };
+  }
+  return { mode: "component", component: comp };
+}
+
+/** Insere HEADER após BODY (ordem esperada na montagem do payload). */
+export function insertHeaderComponentAfterBody(
+  components: unknown[],
+  header: unknown,
+): unknown[] {
+  const idx = components.findIndex(
+    (c) =>
+      typeof c === "object" &&
+      c !== null &&
+      String((c as { type?: string }).type).toUpperCase() === "BODY",
+  );
+  if (idx === -1) return [header, ...components];
+  const out = [...components];
+  out.splice(idx + 1, 0, header);
+  return out;
 }
 
 function buildFooterComponent(state: TemplateFormState, issues: string[]): unknown | null {
@@ -570,10 +757,14 @@ export type MetaSubmitPayload = {
   components: unknown[];
 };
 
-export function validateForMetaSubmit(state: TemplateFormState): {
-  ok: true;
-  payload: MetaSubmitPayload;
-} | { ok: false; issues: string[] } {
+export function validateForMetaSubmit(state: TemplateFormState):
+  | {
+      ok: true;
+      payload: MetaSubmitPayload;
+      /** Presente quando o cabeçalho é IMAGE: servidor fará upload da URL e usará `header_handle`. */
+      headerImageUrlToUpload?: string;
+    }
+  | { ok: false; issues: string[] } {
   const issues: string[] = [];
   const name = slugifyTemplateName(state.name);
   if (!name) issues.push("Informe um nome válido para o modelo (letras minúsculas, números e _).");
@@ -585,8 +776,13 @@ export function validateForMetaSubmit(state: TemplateFormState): {
   const body = buildBodyComponent(state, issues);
   if (body) components.push(body);
 
-  const header = buildHeaderComponent(state, issues);
-  if (header) components.push(header);
+  let headerImageUrlToUpload: string | undefined;
+  const headerBuild = buildHeaderForMetaSubmit(state, issues);
+  if (headerBuild.mode === "component") {
+    components.push(headerBuild.component);
+  } else if (headerBuild.mode === "pending") {
+    headerImageUrlToUpload = headerBuild.url;
+  }
 
   const footer = buildFooterComponent(state, issues);
   if (footer) components.push(footer);
@@ -615,7 +811,200 @@ export function validateForMetaSubmit(state: TemplateFormState): {
       parameter_format: state.parameterFormat,
       components,
     },
+    ...(headerImageUrlToUpload
+      ? { headerImageUrlToUpload }
+      : {}),
   };
+}
+
+/**
+ * Chaves de erro por campo para UI (borda vermelha + mensagem).
+ * Chaves: `name`, `body`, `footer`, `header`, `language`,
+ * `sample:${sampleKey}`, `btnLabel:${buttonId}`, `btnUrl:${buttonId}`.
+ * Valores: código i18n em `app.templates.create.fieldErrors`.
+ */
+export function getTemplateFormFieldErrorKeys(
+  state: TemplateFormState,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+
+  if (!slugifyTemplateName(state.name)) {
+    out.name = "nameInvalid";
+  }
+
+  const lang = state.language.trim().replace(/-/g, "_");
+  if (!lang) {
+    out.language = "languageRequired";
+  }
+
+  const bt = state.body.trim();
+  if (!bt) {
+    out.body = "bodyRequired";
+  } else if (bt.length > BODY_MAX) {
+    out.body = "bodyTooLong";
+  } else if (state.parameterFormat === "named") {
+    if (hasPositional(bt)) {
+      out.body = "bodyNamedNoPositional";
+    } else {
+      for (const n of extractNamedPlaceholders(bt)) {
+        if (!(state.samples[n] ?? "").trim()) {
+          out[`sample:${n}`] = "sampleMissing";
+        }
+      }
+    }
+  } else {
+    if (hasNamed(bt)) {
+      out.body = "bodyPositionalNoNamed";
+    } else {
+      for (const num of extractPositionalPlaceholders(bt)) {
+        if (!(state.samples[`p${num}`] ?? "").trim()) {
+          out[`sample:p${num}`] = "sampleMissing";
+        }
+      }
+    }
+  }
+
+  if (state.footer.trim().length > FOOTER_MAX) {
+    out.footer = "footerTooLong";
+  }
+
+  if (state.headerKind === "text") {
+    const ht = state.headerText.trim();
+    if (ht.length > HEADER_MAX) {
+      out.header = "headerTooLong";
+    } else if (ht) {
+      if (state.parameterFormat === "named") {
+        if (extractPositionalPlaceholders(ht).length > 0) {
+          out.header = "headerNamedInvalid";
+        } else {
+          const names = extractNamedPlaceholders(ht);
+          if (names.length > 1) {
+            out.header = "headerTooManyVars";
+          } else if (names.length === 1) {
+            const n = names[0]!;
+            const ex = (state.samples[`header_${n}`] ?? state.samples[n] ?? "").trim();
+            if (!ex) {
+              out[`sample:header_${n}`] = "sampleMissing";
+            }
+          }
+        }
+      } else {
+        if (extractNamedPlaceholders(ht).length > 0) {
+          out.header = "headerPositionalInvalid";
+        } else {
+          const pos = extractPositionalPlaceholders(ht);
+          if (pos.length > 1) {
+            out.header = "headerTooManyVars";
+          } else if (pos.length === 1) {
+            const d = pos[0]!;
+            const ex = (
+              state.samples[`header_p${d}`] ?? state.samples[`p${d}`] ?? ""
+            ).trim();
+            if (!ex) {
+              out[`sample:header_p${d}`] = "sampleMissing";
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (state.headerKind === "image") {
+    const url = state.headerImageSampleUrl.trim();
+    if (!url) {
+      out.headerImage = "headerImageSampleRequired";
+    } else if (!isValidTemplateImageSampleUrl(url)) {
+      out.headerImage = "headerImageUrlInvalid";
+    }
+    if (state.headerImageBinding === "variable") {
+      if (state.parameterFormat !== "named") {
+        out.headerImageBinding = "headerImageVariableNamedOnly";
+      } else {
+        const vn = state.headerImageUrlVariableName.trim();
+        if (!vn) {
+          out.headerImageVariable = "headerImageVariableNameRequired";
+        } else if (!isValidNamedTemplatePlaceholderName(vn)) {
+          out.headerImageVariable = "headerImageVariableNameInvalid";
+        } else if (!(state.samples[vn] ?? state.headerImageSampleUrl).trim()) {
+          out[`sample:${vn}`] = "sampleMissing";
+        }
+      }
+    }
+  }
+
+  if (state.buttonsEnabled && state.buttons.length > 0) {
+    const ordered = orderButtonsForMeta(state.buttons);
+    const keyToIds = new Map<string, string[]>();
+    for (const b of ordered) {
+      const k = normalizeButtonLabelKey(b.text);
+      if (!k) continue;
+      const arr = keyToIds.get(k) ?? [];
+      arr.push(b.id);
+      keyToIds.set(k, arr);
+    }
+    const dupKeys = new Set<string>();
+    for (const [k, ids] of keyToIds) {
+      if (k && ids.length > 1) dupKeys.add(k);
+    }
+
+    for (const b of ordered) {
+      const label = b.text.trim();
+      const nk = normalizeButtonLabelKey(b.text);
+      if (!label) {
+        out[`btnLabel:${b.id}`] = "buttonLabelRequired";
+      } else if (label.length > BTN_LABEL_MAX) {
+        out[`btnLabel:${b.id}`] = "buttonLabelTooLong";
+      } else if (nk && dupKeys.has(nk)) {
+        out[`btnLabel:${b.id}`] = "buttonLabelDuplicate";
+      }
+
+      if (b.kind !== "url") continue;
+      const uRaw = normalizeUrlWithHttps(b.url);
+      if (uRaw === "https://" || uRaw === "https:") {
+        out[`btnUrl:${b.id}`] = "buttonUrlSchemeOnly";
+        continue;
+      }
+      const pf = state.parameterFormat;
+      if (pf === "named") {
+        const hasPos = hasPositional(uRaw);
+        const hasNam = hasNamed(uRaw);
+        if (hasPos && hasNam) {
+          out[`btnUrl:${b.id}`] = "buttonUrlMixedVars";
+        } else if (hasNam) {
+          const names = extractNamedPlaceholders(uRaw);
+          const uniq = [...new Set(names)];
+          if (uniq.length > 1) {
+            out[`btnUrl:${b.id}`] = "buttonUrlTooManyNamed";
+          } else {
+            const param = uniq[0]!;
+            if (!(state.samples[param] ?? "").trim()) {
+              out[`btnUrl:${b.id}`] = "buttonUrlSampleMissing";
+            }
+          }
+        } else if (uRaw.length > URL_MAX) {
+          out[`btnUrl:${b.id}`] = "buttonUrlTooLong";
+        }
+      } else {
+        if (hasNamed(uRaw)) {
+          out[`btnUrl:${b.id}`] = "buttonUrlNamedInPositionalModel";
+        } else {
+          const nums = extractPositionalPlaceholders(uRaw);
+          if (nums.length > 1) {
+            out[`btnUrl:${b.id}`] = "buttonUrlTooManyPositional";
+          } else if (nums.length === 1) {
+            const n = nums[0]!;
+            if (!(state.samples[`p${n}`] ?? "").trim()) {
+              out[`btnUrl:${b.id}`] = "buttonUrlSampleMissing";
+            }
+          } else if (uRaw.length > URL_MAX) {
+            out[`btnUrl:${b.id}`] = "buttonUrlTooLong";
+          }
+        }
+      }
+    }
+  }
+
+  return out;
 }
 
 /** Componentes mínimos para prévia / listagem (sem blocos example). */
@@ -623,6 +1012,9 @@ export function componentsFromFormStateForPreview(state: TemplateFormState): unk
   const out: unknown[] = [];
   const body = state.body.trim();
   if (body) out.push({ type: "BODY", text: body });
+  if (state.headerKind === "image") {
+    out.push({ type: "HEADER", format: "IMAGE" });
+  }
   if (state.headerKind === "text" && state.headerText.trim()) {
     out.push({
       type: "HEADER",
@@ -717,10 +1109,38 @@ export function templateRecordToFormStateForDuplicate(
   const parts = extractEditableTemplateFields(tpl.components);
   s.body = parts.body;
   s.footer = parts.footer;
-  const ht = extractHeaderTextForPreview(tpl.components).trim();
-  if (ht) {
-    s.headerKind = "text";
-    s.headerText = ht;
+
+  let hasImageHeader = false;
+  if (Array.isArray(tpl.components)) {
+    for (const c of tpl.components) {
+      if (String((c as { type?: string }).type).toUpperCase() !== "HEADER") {
+        continue;
+      }
+      const fmt = String((c as { format?: string }).format ?? "").toUpperCase();
+      if (fmt === "IMAGE") {
+        hasImageHeader = true;
+        s.headerKind = "image";
+        s.headerImageBinding = "fixed";
+        s.headerImageSampleUrl = "";
+        s.headerImageUrlVariableName = "";
+        s.headerText = "";
+        const ex = (c as {
+          example?: { header_handle?: unknown; header_url?: unknown };
+        }).example;
+        const hu = ex?.header_url;
+        if (Array.isArray(hu) && typeof hu[0] === "string" && hu[0].trim()) {
+          s.headerImageSampleUrl = hu[0]!.trim();
+        }
+        break;
+      }
+    }
+  }
+  if (!hasImageHeader) {
+    const ht = extractHeaderTextForPreview(tpl.components).trim();
+    if (ht) {
+      s.headerKind = "text";
+      s.headerText = ht;
+    }
   }
 
   const draftButtons: DraftButton[] = [];

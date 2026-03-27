@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-
 export type IntegrationDto = {
   phoneNumberId: string;
   businessAccountId: string | null;

@@ -1,9 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link, useRouter } from "@/i18n/navigation";
-import { Copy, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import {
+  Copy,
+  LayoutTemplate,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
+import { useToast } from "@/components/ToastProvider";
 import type { MessageTemplateRecord } from "@/lib/meta/graph";
 import { isMessageTemplateEditableByMeta } from "@/lib/meta/template-editable";
 import { templateHasUnsupportedEditTypes } from "@/lib/meta/template-edit-build";
@@ -16,10 +25,13 @@ import {
   templateRecordToFormStateForDuplicate,
 } from "@/lib/meta/template-create-payload";
 import { suggestDuplicateTemplateName } from "@/lib/meta/template-components";
+import {
+  TEMPLATE_FILTER_CATEGORY_VALUES,
+  TEMPLATE_FILTER_STATUS_VALUES,
+  type TemplatesListSortKey,
+} from "@/lib/templates/template-list-query";
 import { TemplateViewModal } from "./TemplateViewModal";
 import { TemplateEditModal } from "./TemplateEditModal";
-
-type SortKey = "recent" | "nameAsc" | "nameDesc";
 
 export type DraftSnapshot = {
   id: string;
@@ -29,6 +41,8 @@ export type DraftSnapshot = {
 type Props = {
   tenantId: string;
   initialTemplates: MessageTemplateRecord[];
+  initialNextCursor: string | null;
+  initialTotal: number;
   initialDraftSnapshots: DraftSnapshot[];
   initialError: string | null;
   integrationConfigured: boolean;
@@ -108,9 +122,18 @@ function statusLabel(
   return code?.trim() || "—";
 }
 
+function toggleInSet(prev: Set<string>, value: string): Set<string> {
+  const next = new Set(prev);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return next;
+}
+
 export function TemplatesPageClient({
   tenantId,
   initialTemplates,
+  initialNextCursor,
+  initialTotal,
   initialDraftSnapshots,
   initialError,
   integrationConfigured,
@@ -118,18 +141,32 @@ export function TemplatesPageClient({
   canSendCampaignFromTemplate,
 }: Props) {
   const t = useTranslations("app.templates");
+  const toast = useToast();
   const router = useRouter();
   const manage = canManageMetaTemplates;
   const canCampaign = canSendCampaignFromTemplate;
 
   const [rows, setRows] = useState(initialTemplates);
-  const [draftSnapshots, setDraftSnapshots] = useState(initialDraftSnapshots);
+  const [nextCursor, setNextCursor] = useState(initialNextCursor);
+  const [total, setTotal] = useState(initialTotal);
+  const [listLoading, setListLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<SortKey>("recent");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [sort, setSort] = useState<TemplatesListSortKey>("recent");
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(() => new Set());
+  const [categoryFilter, setCategoryFilter] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const [draftSnapshots, setDraftSnapshots] = useState(initialDraftSnapshots);
   const [viewOpen, setViewOpen] = useState<MessageTemplateRecord | null>(null);
   const [editOpen, setEditOpen] = useState<MessageTemplateRecord | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
-  const [banner, setBanner] = useState<string | null>(null);
+
+  const skipNextFilterFetch = useRef(true);
 
   const snapshotById = useMemo(() => {
     const m = new Map<string, DraftSnapshot>();
@@ -138,57 +175,110 @@ export function TemplatesPageClient({
   }, [draftSnapshots]);
 
   useEffect(() => {
-    setRows(initialTemplates);
-  }, [initialTemplates]);
-
-  useEffect(() => {
     setDraftSnapshots(initialDraftSnapshots);
   }, [initialDraftSnapshots]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    let list = rows;
-    if (q) {
-      list = rows.filter((r) => {
-        const blob = [r.name, r.category, r.language, r.status, r.id]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        return blob.includes(q);
-      });
-    }
-    const out = [...list];
-    if (sort === "nameAsc") {
-      out.sort((a, b) =>
-        (a.name ?? "").localeCompare(b.name ?? "", "pt-BR", {
-          sensitivity: "base",
-        }),
-      );
-    } else if (sort === "nameDesc") {
-      out.sort((a, b) =>
-        (b.name ?? "").localeCompare(a.name ?? "", "pt-BR", {
-          sensitivity: "base",
-        }),
-      );
-    } else {
-      out.sort((a, b) => {
-        const ta = Number(a.last_updated_time ?? 0);
-        const tb = Number(b.last_updated_time ?? 0);
-        if (ta !== tb) return tb - ta;
-        return (a.name ?? "").localeCompare(b.name ?? "", "pt-BR");
-      });
-    }
-    return out;
-  }, [rows, query, sort]);
+  useEffect(() => {
+    setRows(initialTemplates);
+    setNextCursor(initialNextCursor);
+    setTotal(initialTotal);
+  }, [initialTemplates, initialNextCursor, initialTotal]);
 
-  function showBanner(msg: string) {
-    setBanner(msg);
-    window.setTimeout(() => setBanner(null), 6000);
-  }
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQuery(query.trim()), 350);
+    return () => clearTimeout(id);
+  }, [query]);
+
+  const buildListUrl = useCallback(
+    (opts: { cursor?: string | null }) => {
+      const params = new URLSearchParams();
+      params.set("limit", "25");
+      params.set("sort", sort);
+      if (debouncedQuery) params.set("q", debouncedQuery);
+      for (const s of statusFilter) params.append("status", s);
+      for (const c of categoryFilter) params.append("category", c);
+      if (opts.cursor) params.set("cursor", opts.cursor);
+      return `/api/t/${tenantId}/templates/list?${params.toString()}`;
+    },
+    [tenantId, sort, debouncedQuery, statusFilter, categoryFilter],
+  );
+
+  const nextCursorRef = useRef(nextCursor);
+  nextCursorRef.current = nextCursor;
+
+  const fetchList = useCallback(
+    async (reset: boolean) => {
+      setListError(null);
+      if (reset) {
+        setListLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
+      try {
+        const url = buildListUrl({
+          cursor: reset ? null : nextCursorRef.current,
+        });
+        const res = await fetch(url);
+        const data = (await res.json()) as {
+          templates?: MessageTemplateRecord[];
+          nextCursor?: string | null;
+          total?: number;
+          loadError?: string | null;
+          error?: string;
+        };
+        if (!res.ok) {
+          setListError(data.error ?? t("loadError"));
+          return;
+        }
+        const page = data.templates ?? [];
+        if (reset) {
+          setRows(page);
+        } else {
+          setRows((prev) => {
+            const seen = new Set(prev.map((r) => rowKey(r)));
+            const add = page.filter((r) => !seen.has(rowKey(r)));
+            return [...prev, ...add];
+          });
+        }
+        setNextCursor(data.nextCursor ?? null);
+        if (typeof data.total === "number") setTotal(data.total);
+        if (data.loadError && reset) {
+          setListError(data.loadError);
+        }
+      } catch {
+        setListError(t("loadError"));
+      } finally {
+        setListLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [buildListUrl, t],
+  );
+
+  const filterEffectKey = useMemo(
+    () =>
+      JSON.stringify({
+        sort,
+        q: debouncedQuery,
+        st: [...statusFilter].sort().join(","),
+        cat: [...categoryFilter].sort().join(","),
+      }),
+    [sort, debouncedQuery, statusFilter, categoryFilter],
+  );
+
+  const fetchListRef = useRef(fetchList);
+  fetchListRef.current = fetchList;
+
+  useEffect(() => {
+    if (skipNextFilterFetch.current) {
+      skipNextFilterFetch.current = false;
+      return;
+    }
+    void fetchListRef.current(true);
+  }, [filterEffectKey]);
 
   async function duplicateTemplate(tpl: MessageTemplateRecord) {
     if (!manage) return;
-    setBanner(null);
     setActionId(tpl.id ?? "dup");
 
     let formPayload: Record<string, unknown>;
@@ -200,7 +290,7 @@ export function TemplatesPageClient({
       }
       const snap = snapshotById.get(uuid);
       if (!snap) {
-        showBanner(t("duplicateSnapshotMissing"));
+        toast.warning(t("duplicateSnapshotMissing"));
         setActionId(null);
         return;
       }
@@ -224,11 +314,12 @@ export function TemplatesPageClient({
     const data = (await res.json()) as { error?: string };
     setActionId(null);
     if (!res.ok) {
-      showBanner(data.error ?? t("duplicateError"));
+      toast.error(data.error ?? t("duplicateError"));
       return;
     }
-    showBanner(t("duplicateOk"));
+    toast.success(t("duplicateOk"));
     router.refresh();
+    void fetchList(true);
   }
 
   async function deleteTemplate(tpl: MessageTemplateRecord) {
@@ -245,7 +336,6 @@ export function TemplatesPageClient({
       const uuid = parseDraftUuidFromTemplateId(tpl.id);
       if (!uuid) return;
       setActionId(tpl.id);
-      setBanner(null);
       const res = await fetch(
         `/api/t/${tenantId}/templates/drafts/${encodeURIComponent(uuid)}`,
         { method: "DELETE" },
@@ -253,17 +343,17 @@ export function TemplatesPageClient({
       const data = (await res.json()) as { error?: string };
       setActionId(null);
       if (!res.ok) {
-        showBanner(data.error ?? t("deleteError"));
+        toast.error(data.error ?? t("deleteError"));
         return;
       }
       setRows((prev) => prev.filter((r) => r.id !== tpl.id));
-      showBanner(t("deleteOkDraft"));
+      toast.success(t("deleteOkDraft"));
       router.refresh();
+      void fetchList(true);
       return;
     }
 
     setActionId(tpl.id);
-    setBanner(null);
     const res = await fetch(
       `/api/t/${tenantId}/templates/${encodeURIComponent(tpl.id)}`,
       { method: "DELETE" },
@@ -271,12 +361,13 @@ export function TemplatesPageClient({
     const data = (await res.json()) as { error?: string };
     setActionId(null);
     if (!res.ok) {
-      showBanner(data.error ?? t("deleteError"));
+      toast.error(data.error ?? t("deleteError"));
       return;
     }
     setRows((prev) => prev.filter((r) => r.id !== tpl.id));
-    showBanner(t("deleteOk"));
+    toast.success(t("deleteOk"));
     router.refresh();
+    void fetchList(true);
   }
 
   function campaignHref(tpl: MessageTemplateRecord): string {
@@ -300,64 +391,191 @@ export function TemplatesPageClient({
     setEditOpen(tpl);
   }
 
-  const showError = initialError ?? (!integrationConfigured ? t("noIntegration") : null);
+  const showError =
+    initialError ??
+    listError ??
+    (!integrationConfigured ? t("noIntegration") : null);
+
+  const hasRows = rows.length > 0;
+  const canLoadMore = Boolean(nextCursor) && !listLoading;
+  const filtersActive =
+    statusFilter.size > 0 ||
+    categoryFilter.size > 0 ||
+    Boolean(debouncedQuery);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="ds-page-title">{t("title")}</h1>
-        <p className="ds-subtitle mt-1">{t("subtitle")}</p>
-      </div>
+    <div className="space-y-8 pb-10">
+      <header className="relative overflow-hidden rounded-2xl border border-border bg-card shadow-md">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.55]"
+          style={{
+            backgroundImage: `
+              linear-gradient(118deg, rgb(13 148 136 / 0.16) 0%, transparent 42%),
+              linear-gradient(305deg, rgb(59 130 246 / 0.09) 0%, transparent 46%),
+              radial-gradient(ellipse 85% 70% at 92% -10%, rgb(20 184 166 / 0.14), transparent 72%)
+            `,
+          }}
+        />
+        <div className="relative flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+          <div className="flex gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-600 text-white shadow-lg ring-2 ring-teal-300/35">
+              <LayoutTemplate className="h-7 w-7" strokeWidth={1.5} aria-hidden />
+            </div>
+            <div>
+              <h1 className="font-display text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+                {t("title")}
+              </h1>
+              <p className="mt-1 max-w-2xl text-sm text-fg-secondary">
+                {t("subtitle")}
+              </p>
+            </div>
+          </div>
+          {manage ? (
+            <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+              <Link
+                href={`/${tenantId}/templates/new`}
+                className="ds-btn-primary inline-flex items-center justify-center gap-2"
+              >
+                <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
+                {t("createTemplate")}
+              </Link>
+            </div>
+          ) : null}
+        </div>
+      </header>
 
       {showError ? <div className="ds-alert-warning">{showError}</div> : null}
-      {banner ? <div className="ds-alert-warning">{banner}</div> : null}
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="relative min-w-[200px] max-w-md flex-1">
-          <Search
-            className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-muted"
-            strokeWidth={1.5}
-            aria-hidden
-          />
-          <input
-            type="search"
-            className="ds-input pr-10"
-            placeholder={t("searchPlaceholder")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label={t("searchPlaceholder")}
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {manage ? (
-            <Link
-              href={`/${tenantId}/templates/new`}
-              className="ds-btn-primary ds-btn-sm inline-flex items-center gap-1.5"
-            >
-              <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-              {t("createTemplate")}
-            </Link>
-          ) : null}
-          <label className="flex items-center gap-2 text-sm text-fg-secondary">
-            <span>{t("sortLabel")}</span>
-            <select
-              className="ds-select mt-0 h-9 min-w-[160px]"
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-            >
-              <option value="recent">{t("sortRecent")}</option>
-              <option value="nameAsc">{t("sortNameAsc")}</option>
-              <option value="nameDesc">{t("sortNameDesc")}</option>
-            </select>
-          </label>
-        </div>
-      </div>
+      <section className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between">
+            <div className="relative min-w-[200px] max-w-md flex-1">
+              <Search
+                className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-muted"
+                strokeWidth={1.5}
+                aria-hidden
+              />
+              <input
+                type="search"
+                className="ds-input pr-10"
+                placeholder={t("searchPlaceholder")}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label={t("searchPlaceholder")}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-sm text-fg-secondary">
+                <span>{t("sortLabel")}</span>
+                <select
+                  className="ds-select mt-0 h-9 min-w-[160px]"
+                  value={sort}
+                  onChange={(e) =>
+                    setSort(e.target.value as TemplatesListSortKey)
+                  }
+                >
+                  <option value="recent">{t("sortRecent")}</option>
+                  <option value="nameAsc">{t("sortNameAsc")}</option>
+                  <option value="nameDesc">{t("sortNameDesc")}</option>
+                </select>
+              </label>
+            </div>
+          </div>
 
-      {!showError && filtered.length === 0 ? (
-        <p className="ds-subtitle">{t("empty")}</p>
+          <div>
+            <p className="ds-label mb-2">{t("filterStatusLabel")}</p>
+            <div className="flex flex-wrap gap-2">
+              {TEMPLATE_FILTER_STATUS_VALUES.map((code) => {
+                const active = statusFilter.has(code);
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() =>
+                      setStatusFilter((prev) => toggleInSet(prev, code))
+                    }
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      active
+                        ? "border-primary-300 bg-primary-50 text-primary-800"
+                        : "border-border bg-neutral-50 text-fg-secondary hover:bg-neutral-100"
+                    }`}
+                  >
+                    {statusLabel(code, t as (key: string) => string)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <p className="ds-label mb-2">{t("filterCategoryLabel")}</p>
+            <div className="flex flex-wrap gap-2">
+              {TEMPLATE_FILTER_CATEGORY_VALUES.map((code) => {
+                const active = categoryFilter.has(code);
+                const labelKey =
+                  code === "MARKETING"
+                    ? "category.marketing"
+                    : code === "UTILITY"
+                      ? "category.utility"
+                      : "category.authentication";
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() =>
+                      setCategoryFilter((prev) => toggleInSet(prev, code))
+                    }
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      active
+                        ? "border-primary-300 bg-primary-50 text-primary-800"
+                        : "border-border bg-neutral-50 text-fg-secondary hover:bg-neutral-100"
+                    }`}
+                  >
+                    {t(labelKey)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-sm text-fg-secondary">
+            <span>
+              {listLoading ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                  {t("loading")}
+                </span>
+              ) : (
+                t("listCount", { shown: rows.length, total })
+              )}
+            </span>
+            {(statusFilter.size > 0 ||
+              categoryFilter.size > 0 ||
+              debouncedQuery) && (
+              <button
+                type="button"
+                className="text-primary-600 hover:underline"
+                onClick={() => {
+                  setStatusFilter(new Set());
+                  setCategoryFilter(new Set());
+                  setQuery("");
+                  setDebouncedQuery("");
+                }}
+              >
+                {t("clearFilters")}
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {!showError && !listLoading && !hasRows ? (
+        <p className="ds-subtitle">
+          {filtersActive ? t("emptyFiltered") : t("empty")}
+        </p>
       ) : null}
 
-      {filtered.length > 0 ? (
+      {hasRows ? (
         <div className="ds-table-wrap">
           <table className="ds-table min-w-[880px]">
             <thead>
@@ -371,7 +589,7 @@ export function TemplatesPageClient({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((tpl) => {
+              {rows.map((tpl) => {
                 const id = tpl.id;
                 const busy = Boolean(id && actionId === id);
                 const dbDraft = isDbTemplateDraft(tpl);
@@ -466,6 +684,22 @@ export function TemplatesPageClient({
         </div>
       ) : null}
 
+      {canLoadMore ? (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            disabled={loadingMore}
+            onClick={() => void fetchList(false)}
+            className="ds-btn-secondary ds-btn-sm inline-flex items-center gap-2"
+          >
+            {loadingMore ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+            ) : null}
+            {t("loadMore")}
+          </button>
+        </div>
+      ) : null}
+
       <TemplateViewModal
         template={viewOpen}
         open={viewOpen !== null}
@@ -477,7 +711,10 @@ export function TemplatesPageClient({
         open={editOpen !== null}
         tenantId={tenantId}
         onClose={() => setEditOpen(null)}
-        onSaved={() => router.refresh()}
+        onSaved={() => {
+          router.refresh();
+          void fetchList(true);
+        }}
       />
     </div>
   );

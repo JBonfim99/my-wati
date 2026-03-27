@@ -16,6 +16,7 @@ function sanitizeExample(ex: unknown): unknown {
     "header_text",
     "body_text",
     "header_handle",
+    "header_url",
     "header_text_named_params",
     "body_text_named_params",
   ] as const) {

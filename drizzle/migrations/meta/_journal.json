@@ -43,6 +43,13 @@
       "when": 1774600000000,
       "tag": "0005_message_template_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774610000000,
+      "tag": "0006_tenant_fixed_fields",
+      "breakpoints": true
     }
   ]
 }
