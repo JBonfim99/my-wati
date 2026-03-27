@@ -470,3 +470,51 @@ export async function listMessageTemplatesFromWaba(
 
   return all;
 }
+
+/**
+ * Lista templates do WABA filtrando por nome (e opcionalmente idioma).
+ * @see https://developers.facebook.com/docs/graph-api/reference/whats-app-business-account/message_templates/
+ */
+export async function listMessageTemplatesFromWabaFiltered(
+  accessToken: string,
+  businessAccountId: string,
+  filters: { name: string; language?: string },
+  graphVersion: string = DEFAULT_VERSION,
+): Promise<MessageTemplateRecord[]> {
+  const waba = businessAccountId.trim();
+  const base = `https://graph.facebook.com/${graphVersion}/${waba}/message_templates`;
+  const q = new URLSearchParams();
+  q.set("fields", TEMPLATE_LIST_FIELDS);
+  q.set("limit", "50");
+  q.set("name", filters.name.trim());
+  const lang = filters.language?.trim();
+  if (lang) q.set("language", lang);
+
+  const all: MessageTemplateRecord[] = [];
+  let url: string | null = `${base}?${q}`;
+  let isFirst = true;
+
+  while (url) {
+    const res = await fetch(url, {
+      headers: isFirst ? { Authorization: `Bearer ${accessToken}` } : {},
+    });
+    isFirst = false;
+
+    const json = (await res.json()) as {
+      data?: MessageTemplateRecord[];
+      paging?: { next?: string };
+      error?: { message: string };
+    };
+
+    if (!res.ok || json.error) {
+      throw new Error(
+        json.error?.message ?? res.statusText ?? "Failed to list templates",
+      );
+    }
+
+    all.push(...(json.data ?? []));
+    url = json.paging?.next ?? null;
+  }
+
+  return all;
+}

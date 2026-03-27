@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { requireTenantContext } from "@/lib/api-tenant-context";
 import { getDb } from "@/lib/db";
+import { getIntegrationSettingsDto } from "@/lib/settings/integration-summary";
 import { tenantIntegrations } from "@/lib/db/schema";
 import { wabaTemplatesCacheTag } from "@/lib/meta/cached-templates";
 import { canManageIntegration } from "@/lib/rbac";
@@ -28,32 +29,9 @@ export async function GET(_req: Request, route: RouteCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const db = getDb();
-  const [row] = await db
-    .select({
-      phoneNumberId: tenantIntegrations.phoneNumberId,
-      businessAccountId: tenantIntegrations.businessAccountId,
-      graphApiVersion: tenantIntegrations.graphApiVersion,
-      hasToken: tenantIntegrations.encryptedAccessToken,
-      appSecret: tenantIntegrations.appSecret,
-      updatedAt: tenantIntegrations.updatedAt,
-    })
-    .from(tenantIntegrations)
-    .where(eq(tenantIntegrations.tenantId, ctx.tenantId))
-    .limit(1);
+  const integration = await getIntegrationSettingsDto(db, ctx.tenantId);
 
-  return NextResponse.json({
-    integration: row
-      ? {
-          phoneNumberId: row.phoneNumberId,
-          businessAccountId: row.businessAccountId,
-          graphApiVersion: row.graphApiVersion,
-          hasAccessToken: Boolean(row.hasToken),
-          hasVerifyToken: true,
-          hasAppSecret: Boolean(row.appSecret),
-          updatedAt: row.updatedAt.toISOString(),
-        }
-      : null,
-  });
+  return NextResponse.json({ integration });
 }
 
 export async function PUT(req: NextRequest, route: RouteCtx) {

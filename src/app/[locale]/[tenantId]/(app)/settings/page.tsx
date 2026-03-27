@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import IntegrationSettingsClient from "@/components/settings/IntegrationSettingsClient";
+import { getDb } from "@/lib/db";
+import { getIntegrationSettingsDto } from "@/lib/settings/integration-summary";
 import { canManageIntegration } from "@/lib/rbac";
 import {
   getCachedTenantSession,
@@ -18,5 +20,12 @@ export default async function SettingsPage({
   if (!ctx || !canManageIntegration(ctx)) {
     redirect(`/${tenantId}/dashboard`);
   }
-  return <IntegrationSettingsClient tenantId={String(tenantId)} />;
+  const db = getDb();
+  const initialIntegration = await getIntegrationSettingsDto(db, tenantId);
+  return (
+    <IntegrationSettingsClient
+      tenantId={String(tenantId)}
+      initialIntegration={initialIntegration}
+    />
+  );
 }

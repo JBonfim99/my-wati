@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { z } from "zod";
+import { fetchTemplateComponentsForCampaignPreview } from "@/lib/campaigns/fetch-template-components";
 import { getCampaignDetailForTenant } from "@/lib/campaigns/detail-queries";
 import { getDb } from "@/lib/db";
 import {
@@ -31,6 +32,21 @@ export default async function CampaignDetailPage({ params }: Props) {
   );
   if (!detail) notFound();
 
+  let templateComponents = detail.templateComponents;
+  if (!templateComponents?.length) {
+    try {
+      const fromGraph = await fetchTemplateComponentsForCampaignPreview(
+        db,
+        tenantId,
+        detail.templateName,
+        detail.templateLanguage,
+      );
+      if (fromGraph?.length) templateComponents = fromGraph;
+    } catch {
+      /* preview fica vazio se Graph falhar */
+    }
+  }
+
   return (
     <CampaignDetailPageClient
       tenantId={tp}
@@ -43,7 +59,7 @@ export default async function CampaignDetailPage({ params }: Props) {
         scheduledAt: detail.scheduledAt?.toISOString() ?? null,
         createdAt: detail.createdAt.toISOString(),
         listId: detail.listId,
-        templateComponents: detail.templateComponents,
+        templateComponents,
         createdByLabel: detail.createdByLabel,
         firstSentAt: detail.firstSentAt?.toISOString() ?? null,
         breakdown: detail.breakdown,

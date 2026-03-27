@@ -64,6 +64,13 @@
       "when": 1774630000000,
       "tag": "0008_campaigns_scheduled_at",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1774640000000,
+      "tag": "0009_whatsapp_delivery_events",
+      "breakpoints": true
     }
   ]
 }

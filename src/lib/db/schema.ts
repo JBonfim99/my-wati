@@ -387,6 +387,36 @@ export const campaignRecipients = pgTable(
   ],
 );
 
+/** Histórico append-only de webhooks WhatsApp (status de entrega, quick reply, etc.). */
+export const whatsappDeliveryEvents = pgTable(
+  "whatsapp_delivery_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: bigint("tenant_id", { mode: "number" })
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    phoneNumberId: text("phone_number_id").notNull(),
+    wamid: text("wamid"),
+    recipientId: uuid("recipient_id").references(() => campaignRecipients.id, {
+      onDelete: "set null",
+    }),
+    /** Ex.: `status` (callback de entrega), `user_button` (toque em quick reply). */
+    source: text("source").notNull(),
+    deliveryStatus: text("delivery_status"),
+    errors: jsonb("errors").$type<unknown>(),
+    payload: jsonb("payload").$type<unknown>().notNull(),
+    webhookTs: timestamp("webhook_ts", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("wde_tenant_wamid_idx").on(t.tenantId, t.wamid),
+    index("wde_tenant_created_idx").on(t.tenantId, t.createdAt),
+    index("wde_recipient_idx").on(t.recipientId),
+  ],
+);
+
 export const contactsRelations = relations(contacts, ({ many }) => ({
   tagLinks: many(contactTags),
   customValues: many(contactCustomValues),

@@ -772,6 +772,8 @@
       "hubSubtitle": "Conecte o número da Meta à sua organização: envio de templates, webhooks e modelos aprovados no mesmo lugar.",
       "badgeActive": "Conexão ativa",
       "loading": "Carregando integração…",
+      "loadError": "Não foi possível sincronizar com o servidor (rede ou sessão). Os dados abaixo vêm da última carga da página.",
+      "loadErrorRetry": "Tentar de novo",
       "forbidden": "Apenas administradores podem gerenciar esta integração.",
       "sectionConnection": "Resumo da conexão",
       "sectionConnectionHint": "Identificadores e versão da Graph API salvos para esta organização.",

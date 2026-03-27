@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { revalidateTag } from "next/cache";
-import { eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   campaignRecipients,
   tenantIntegrations,
+  whatsappDeliveryEvents,
 } from "@/lib/db/schema";
 import { wabaTemplatesCacheTag } from "@/lib/meta/cached-templates";
 import { upsertWabaTemplateStatusSnapshot } from "@/lib/templates/waba-template-snapshot-queries";
@@ -70,8 +71,9 @@ function collectWebhookTargets(body: WebhookBody): {
         wabaIds.add(entryId);
       }
       const phone = ch.value?.metadata?.phone_number_id?.trim();
-      const statuses = ch.value?.statuses;
-      if (phone && statuses && statuses.length > 0) {
+      const statuses = ch.value?.statuses ?? [];
+      const msgs = ch.value?.messages ?? [];
+      if (phone && (statuses.length > 0 || msgs.length > 0)) {
         phoneIds.add(phone);
       }
     }
@@ -195,27 +197,136 @@ export async function POST(req: NextRequest) {
       }
 
       const phoneId = ch.value?.metadata?.phone_number_id?.trim();
+      if (!phoneId || !byPhone.has(phoneId)) continue;
+
+      const integration = byPhone.get(phoneId)!;
+      const inboundMessages = ch.value?.messages ?? [];
       const statuses = ch.value?.statuses ?? [];
-      if (!phoneId || statuses.length === 0) continue;
 
-      if (!byPhone.has(phoneId)) continue;
-
-      type StatusUpdate = {
-        wamid: string;
-        status: "sent" | "delivered" | "read" | "failed";
-        errors?: unknown[];
-      };
-      const updates: StatusUpdate[] = [];
-
-      for (const item of statuses) {
-        const wamid = item.id;
-        if (!wamid) continue;
-        const next = STATUS_MAP[item.status ?? ""];
-        if (!next) continue;
-        updates.push({ wamid, status: next, errors: item.errors });
+      function webhookTimestampSec(ts: string | undefined): Date | null {
+        if (ts == null) return null;
+        const n = Number(ts);
+        return Number.isFinite(n) ? new Date(n * 1000) : null;
       }
 
-      if (updates.length === 0) continue;
+      if (inboundMessages.length > 0) {
+        type InMsg = (typeof inboundMessages)[number];
+        const buttonMsgs = inboundMessages.filter(
+          (m): m is InMsg & { type: "button"; button: { text?: string } } =>
+            m.type === "button" &&
+            Boolean(m.button) &&
+            Boolean(m.context?.id?.trim()),
+        );
+        if (buttonMsgs.length > 0) {
+          const parentWamids = [
+            ...new Set(
+              buttonMsgs.map((m) => m.context!.id!.trim()).filter(Boolean),
+            ),
+          ];
+          const recRows =
+            parentWamids.length > 0
+              ? await db
+                  .select({
+                    id: campaignRecipients.id,
+                    wamid: campaignRecipients.wamid,
+                  })
+                  .from(campaignRecipients)
+                  .where(
+                    and(
+                      eq(
+                        campaignRecipients.tenantId,
+                        integration.tenantId,
+                      ),
+                      inArray(campaignRecipients.wamid, parentWamids),
+                    ),
+                  )
+              : [];
+          const wamidToRecipient = new Map(
+            recRows
+              .filter((r) => r.wamid)
+              .map((r) => [r.wamid!, r.id] as const),
+          );
+          await db.insert(whatsappDeliveryEvents).values(
+            buttonMsgs.map((msg) => {
+              const parentWamid = msg.context!.id!.trim();
+              return {
+                tenantId: integration.tenantId,
+                phoneNumberId: phoneId,
+                wamid: parentWamid,
+                recipientId: wamidToRecipient.get(parentWamid) ?? null,
+                source: "user_button",
+                deliveryStatus: null,
+                errors: null,
+                payload: msg,
+                webhookTs: webhookTimestampSec(msg.timestamp),
+              };
+            }),
+          );
+        }
+      }
+
+      if (statuses.length === 0) continue;
+
+      type StatusItem = (typeof statuses)[number];
+      type RawStatus = {
+        wamid: string;
+        rawStatus: string;
+        mapped: "sent" | "delivered" | "read" | "failed" | null;
+        errors: unknown[] | undefined;
+        item: StatusItem;
+      };
+      const rawUpdates: RawStatus[] = [];
+
+      for (const item of statuses) {
+        const wamid = item.id?.trim();
+        if (!wamid) continue;
+        const rawStatus = String(item.status ?? "").trim();
+        if (!rawStatus) continue;
+        const mapped = STATUS_MAP[rawStatus] ?? null;
+        rawUpdates.push({
+          wamid,
+          rawStatus,
+          mapped,
+          errors: item.errors,
+          item,
+        });
+      }
+
+      if (rawUpdates.length > 0) {
+        const wamids = [...new Set(rawUpdates.map((r) => r.wamid))];
+        const recRows = await db
+          .select({
+            id: campaignRecipients.id,
+            wamid: campaignRecipients.wamid,
+          })
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.tenantId, integration.tenantId),
+              inArray(campaignRecipients.wamid, wamids),
+            ),
+          );
+        const wamidToRecipient = new Map(
+          recRows.filter((r) => r.wamid).map((r) => [r.wamid!, r.id] as const),
+        );
+
+        await db.insert(whatsappDeliveryEvents).values(
+          rawUpdates.map((r) => ({
+            tenantId: integration.tenantId,
+            phoneNumberId: phoneId,
+            wamid: r.wamid,
+            recipientId: wamidToRecipient.get(r.wamid) ?? null,
+            source: "status",
+            deliveryStatus: r.rawStatus,
+            errors: r.errors ?? null,
+            payload: r.item,
+            webhookTs: webhookTimestampSec(r.item.timestamp),
+          })),
+        );
+      }
+
+      const mappedRows = rawUpdates.filter((r) => r.mapped);
+      if (mappedRows.length === 0) continue;
 
       type GroupKey = string;
       const groups = new Map<
@@ -227,12 +338,12 @@ export async function POST(req: NextRequest) {
         }
       >();
 
-      for (const u of updates) {
+      for (const u of mappedRows) {
+        const st = u.mapped!;
         const lastError =
-          u.status === "failed" ? JSON.stringify(u.errors ?? []) : null;
-        const key: GroupKey = `${u.status}::${lastError ?? ""}`;
-        const group =
-          groups.get(key) ?? { status: u.status, lastError, wamids: [] };
+          st === "failed" ? JSON.stringify(u.errors ?? []) : null;
+        const key: GroupKey = `${st}::${lastError ?? ""}`;
+        const group = groups.get(key) ?? { status: st, lastError, wamids: [] };
         group.wamids.push(u.wamid);
         groups.set(key, group);
       }
@@ -242,7 +353,12 @@ export async function POST(req: NextRequest) {
           db
             .update(campaignRecipients)
             .set({ status, lastError, updatedAt: new Date() })
-            .where(inArray(campaignRecipients.wamid, wamids)),
+            .where(
+              and(
+                eq(campaignRecipients.tenantId, integration.tenantId),
+                inArray(campaignRecipients.wamid, wamids),
+              ),
+            ),
         ),
       );
     }
@@ -267,6 +383,13 @@ type WebhookBody = {
           id?: string;
           status?: string;
           errors?: unknown[];
+          timestamp?: string;
+        }[];
+        messages?: {
+          type?: string;
+          timestamp?: string;
+          context?: { id?: string };
+          button?: { payload?: string; text?: string };
         }[];
         event?: string;
         message_template_id?: number | string;

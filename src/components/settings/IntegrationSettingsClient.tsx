@@ -2,15 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-export type IntegrationDto = {
-  phoneNumberId: string;
-  businessAccountId: string | null;
-  graphApiVersion: string;
-  hasAccessToken: boolean;
-  hasVerifyToken: boolean;
-  hasAppSecret: boolean;
-  updatedAt: string;
-} | null;
+import type { IntegrationSettingsDto } from "@/lib/settings/integration-summary";
 
 type TestOk = {
   ok: true;
@@ -59,8 +51,11 @@ function Spec({
 
 export default function IntegrationSettingsClient({
   tenantId,
+  initialIntegration,
 }: {
   tenantId: string;
+  /** Dados da RSC — a página funciona mesmo se o bundle JS falhar ao hidratar. */
+  initialIntegration: IntegrationSettingsDto | null;
 }) {
   const t = useTranslations("app.settings");
   const integrationBase = useMemo(
@@ -68,44 +63,59 @@ export default function IntegrationSettingsClient({
     [tenantId],
   );
   const [forbidden, setForbidden] = useState(false);
-  const [integration, setIntegration] = useState<IntegrationDto>(null);
+  const [integration, setIntegration] = useState<IntegrationSettingsDto | null>(
+    initialIntegration,
+  );
   const [editing, setEditing] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestOk | TestFail | null>(null);
 
-  const [phoneNumberId, setPhoneNumberId] = useState("");
+  const [phoneNumberId, setPhoneNumberId] = useState(
+    () => initialIntegration?.phoneNumberId ?? "",
+  );
   const [accessToken, setAccessToken] = useState("");
   const [verifyToken, setVerifyToken] = useState("");
   const [appSecret, setAppSecret] = useState("");
-  const [businessAccountId, setBusinessAccountId] = useState("");
+  const [businessAccountId, setBusinessAccountId] = useState(
+    () => initialIntegration?.businessAccountId ?? "",
+  );
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const loadIntegration = useCallback(async () => {
-    const res = await fetch(integrationBase);
-    if (res.status === 403) {
-      setForbidden(true);
-      setLoading(false);
-      return;
+    setLoadError(null);
+    const ac = new AbortController();
+    const timeoutId = window.setTimeout(() => ac.abort(), 25_000);
+    try {
+      const res = await fetch(integrationBase, { signal: ac.signal });
+      if (res.status === 403) {
+        setForbidden(true);
+        return;
+      }
+      if (!res.ok) {
+        setLoadError(t("loadError"));
+        return;
+      }
+      const data = (await res.json()) as {
+        integration: IntegrationSettingsDto | null;
+      };
+      setIntegration(data.integration);
+      if (data.integration) {
+        setPhoneNumberId(data.integration.phoneNumberId);
+        setBusinessAccountId(data.integration.businessAccountId ?? "");
+        setEditing(false);
+      } else {
+        setPhoneNumberId("");
+        setBusinessAccountId("");
+        setEditing(false);
+      }
+    } catch {
+      setLoadError(t("loadError"));
+    } finally {
+      window.clearTimeout(timeoutId);
     }
-    if (!res.ok) {
-      setLoading(false);
-      return;
-    }
-    const data = (await res.json()) as { integration: IntegrationDto };
-    setIntegration(data.integration);
-    if (data.integration) {
-      setPhoneNumberId(data.integration.phoneNumberId);
-      setBusinessAccountId(data.integration.businessAccountId ?? "");
-      setEditing(false);
-    } else {
-      setPhoneNumberId("");
-      setBusinessAccountId("");
-      setEditing(false);
-    }
-    setLoading(false);
-  }, [integrationBase]);
+  }, [integrationBase, t]);
 
   useEffect(() => {
     void loadIntegration();
@@ -207,14 +217,6 @@ export default function IntegrationSettingsClient({
     );
   }
 
-  if (loading) {
-    return (
-      <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-border bg-card">
-        <p className="text-sm text-fg-muted">{t("loading")}</p>
-      </div>
-    );
-  }
-
   const configured = Boolean(integration?.hasAccessToken);
   const updatedLabel =
     integration?.updatedAt != null
@@ -226,6 +228,21 @@ export default function IntegrationSettingsClient({
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 pb-12">
+      {loadError ? (
+        <div
+          role="alert"
+          className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-4 text-sm text-amber-950 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="font-medium">{loadError}</p>
+          <button
+            type="button"
+            className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+            onClick={() => void loadIntegration()}
+          >
+            {t("loadErrorRetry")}
+          </button>
+        </div>
+      ) : null}
       {/* Cabeçalho */}
       <header className="ds-animate-in relative overflow-hidden rounded-2xl border border-border bg-card shadow-md">
         <div

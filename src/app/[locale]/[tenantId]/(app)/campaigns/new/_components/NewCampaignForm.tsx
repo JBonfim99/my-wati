@@ -233,6 +233,9 @@ export function NewCampaignForm({ tenantId, initialLists }: Props) {
         sendMode === "schedule" && scheduleLocal
           ? new Date(scheduleLocal).toISOString()
           : undefined;
+      const templateComponents = Array.isArray(selectedTemplate?.components)
+        ? selectedTemplate.components
+        : undefined;
       const res = await fetch(`/api/t/${tenantId}/campaigns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -241,6 +244,7 @@ export function NewCampaignForm({ tenantId, initialLists }: Props) {
           templateName,
           templateLanguage,
           listId,
+          ...(templateComponents ? { templateComponents } : {}),
           ...(scheduledAtIso ? { scheduledAt: scheduledAtIso } : {}),
         }),
       });

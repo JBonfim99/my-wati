@@ -8,17 +8,25 @@ import {
   LogOut,
   MessageSquare,
   Phone,
-  Settings,
   Tags,
   User,
   Users,
   Zap,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { MetaWhatsAppGlyph } from "@/components/icons/MetaWhatsAppGlyph";
 import { TenantSelector, type TenantOption } from "@/components/TenantSelector";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { LucideIcon } from "lucide-react";
 
-type NavItem = { href: string; label: string; icon: LucideIcon };
+type NavIcon = LucideIcon | typeof MetaWhatsAppGlyph;
+
+type NavItem = {
+  href: string;
+  label: string;
+  icon: NavIcon;
+  /** Caixa do ícone (glyph Meta é mais largo que 18×18). */
+  iconBoxClass?: string;
+};
 
 type Props = {
   isAdmin: boolean;
@@ -85,7 +93,8 @@ export function AppNav({
               {
                 href: `${base}/settings`,
                 label: t("settings"),
-                icon: Settings,
+                icon: MetaWhatsAppGlyph,
+                iconBoxClass: "h-[18px] w-[21px]",
               } satisfies NavItem,
             ]
           : []),
@@ -127,6 +136,7 @@ export function AppNav({
                   pathname === item.href ||
                   pathname.startsWith(`${item.href}/`);
                 const Icon = item.icon;
+                const iconClass = `shrink-0 ${active ? "text-primary-600" : "text-fg-muted"} ${item.iconBoxClass ?? "h-[18px] w-[18px]"}`;
                 return (
                   <li key={item.href}>
                     <Link
@@ -139,7 +149,7 @@ export function AppNav({
                       }`}
                     >
                       <Icon
-                        className={`h-[18px] w-[18px] shrink-0 ${active ? "text-primary-600" : "text-fg-muted"}`}
+                        className={iconClass}
                         strokeWidth={1.5}
                         aria-hidden
                       />
