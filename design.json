@@ -1,0 +1,555 @@
+{
+  "meta": {
+    "name": "my-wati Design System",
+    "version": "1.0.0",
+    "description": "Design system based on the WhatsApp widget builder UI — multi-step forms, sidebar nav, preview panels",
+    "framework": "Next.js 15 + Tailwind CSS v4",
+    "reference": "mstodio.com widget builder"
+  },
+
+  "colors": {
+    "brand": {
+      "whatsapp": "#25D366",
+      "whatsappDark": "#1DA851",
+      "whatsappLight": "#DCFCE7"
+    },
+    "primary": {
+      "50": "#EEF2FF",
+      "100": "#E0E7FF",
+      "200": "#C7D2FE",
+      "500": "#6366F1",
+      "600": "#4F46E5",
+      "700": "#4338CA",
+      "900": "#312E81"
+    },
+    "neutral": {
+      "0":   "#FFFFFF",
+      "50":  "#F9FAFB",
+      "100": "#F3F4F6",
+      "200": "#E5E7EB",
+      "300": "#D1D5DB",
+      "400": "#9CA3AF",
+      "500": "#6B7280",
+      "600": "#4B5563",
+      "700": "#374151",
+      "800": "#1F2937",
+      "900": "#111827"
+    },
+    "semantic": {
+      "success": "#22C55E",
+      "successLight": "#DCFCE7",
+      "warning": "#F59E0B",
+      "warningLight": "#FEF3C7",
+      "error": "#EF4444",
+      "errorLight": "#FEE2E2",
+      "info": "#3B82F6",
+      "infoLight": "#DBEAFE"
+    },
+    "surface": {
+      "page": "#F3F4F6",
+      "card": "#FFFFFF",
+      "sidebar": "#FFFFFF",
+      "overlay": "rgba(0,0,0,0.4)"
+    },
+    "text": {
+      "primary": "#111827",
+      "secondary": "#6B7280",
+      "muted": "#9CA3AF",
+      "inverse": "#FFFFFF",
+      "link": "#4F46E5",
+      "linkHover": "#4338CA"
+    },
+    "border": {
+      "default": "#E5E7EB",
+      "strong": "#D1D5DB",
+      "focus": "#4F46E5",
+      "selected": "#4F46E5"
+    }
+  },
+
+  "typography": {
+    "fontFamily": {
+      "sans": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "mono": "ui-monospace, 'Cascadia Code', monospace"
+    },
+    "scale": {
+      "xs":   { "size": "12px", "lineHeight": "16px" },
+      "sm":   { "size": "14px", "lineHeight": "20px" },
+      "base": { "size": "16px", "lineHeight": "24px" },
+      "lg":   { "size": "18px", "lineHeight": "28px" },
+      "xl":   { "size": "20px", "lineHeight": "28px" },
+      "2xl":  { "size": "24px", "lineHeight": "32px" },
+      "3xl":  { "size": "30px", "lineHeight": "36px" }
+    },
+    "weight": {
+      "regular":   400,
+      "medium":    500,
+      "semibold":  600,
+      "bold":      700
+    },
+    "roles": {
+      "pageTitle":      { "size": "2xl", "weight": "bold",     "color": "text.primary" },
+      "sectionTitle":   { "size": "lg",  "weight": "semibold", "color": "text.primary" },
+      "cardTitle":      { "size": "base","weight": "semibold", "color": "text.primary" },
+      "label":          { "size": "sm",  "weight": "medium",   "color": "text.primary" },
+      "body":           { "size": "sm",  "weight": "regular",  "color": "text.secondary" },
+      "caption":        { "size": "xs",  "weight": "regular",  "color": "text.muted" },
+      "navSection":     { "size": "xs",  "weight": "semibold", "color": "text.muted",      "transform": "uppercase", "letterSpacing": "0.05em" },
+      "navItem":        { "size": "sm",  "weight": "medium",   "color": "text.secondary" },
+      "navItemActive":  { "size": "sm",  "weight": "semibold", "color": "primary.600" }
+    }
+  },
+
+  "spacing": {
+    "scale": {
+      "0":  "0px",
+      "1":  "4px",
+      "2":  "8px",
+      "3":  "12px",
+      "4":  "16px",
+      "5":  "20px",
+      "6":  "24px",
+      "8":  "32px",
+      "10": "40px",
+      "12": "48px",
+      "16": "64px"
+    }
+  },
+
+  "borderRadius": {
+    "sm":   "4px",
+    "md":   "8px",
+    "lg":   "12px",
+    "xl":   "16px",
+    "2xl":  "24px",
+    "full": "9999px"
+  },
+
+  "shadows": {
+    "sm":  "0 1px 2px rgba(0,0,0,0.05)",
+    "md":  "0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -1px rgba(0,0,0,0.04)",
+    "lg":  "0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -2px rgba(0,0,0,0.04)",
+    "xl":  "0 20px 25px -5px rgba(0,0,0,0.08), 0 10px 10px -5px rgba(0,0,0,0.03)",
+    "card": "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)"
+  },
+
+  "layout": {
+    "sidebar": {
+      "width": "280px",
+      "collapsedWidth": "64px",
+      "background": "surface.sidebar",
+      "borderRight": "border.default",
+      "padding": "16px"
+    },
+    "content": {
+      "background": "surface.page",
+      "padding": "32px",
+      "maxWidth": "1280px"
+    },
+    "previewPanel": {
+      "width": "50%",
+      "background": "surface.page",
+      "borderLeft": "border.default"
+    }
+  },
+
+  "components": {
+
+    "sidebar": {
+      "description": "Left navigation sidebar with logo, section groups, and user footer",
+      "logo": {
+        "iconSize": "32px",
+        "textSize": "lg",
+        "textWeight": "bold",
+        "gap": "8px"
+      },
+      "sectionHeader": {
+        "fontSize": "xs",
+        "fontWeight": "semibold",
+        "color": "text.muted",
+        "textTransform": "uppercase",
+        "letterSpacing": "0.05em",
+        "marginTop": "16px",
+        "marginBottom": "4px"
+      },
+      "navItem": {
+        "height": "36px",
+        "paddingX": "8px",
+        "paddingY": "6px",
+        "borderRadius": "md",
+        "gap": "8px",
+        "iconSize": "16px",
+        "states": {
+          "default": {
+            "background": "transparent",
+            "color": "text.secondary",
+            "iconColor": "text.muted"
+          },
+          "hover": {
+            "background": "neutral.50",
+            "color": "text.primary"
+          },
+          "active": {
+            "background": "primary.50",
+            "color": "primary.600",
+            "iconColor": "primary.600",
+            "fontWeight": "semibold"
+          }
+        }
+      },
+      "navItemChild": {
+        "paddingLeft": "32px",
+        "height": "32px"
+      },
+      "userFooter": {
+        "paddingTop": "12px",
+        "borderTop": "border.default",
+        "avatarSize": "32px",
+        "gap": "8px"
+      }
+    },
+
+    "stepIndicator": {
+      "description": "Horizontal multi-step progress bar at the top of wizard flows",
+      "containerGap": "0px",
+      "connectorHeight": "1px",
+      "connectorColor": "border.default",
+      "connectorActiveColor": "primary.600",
+      "step": {
+        "circleSize": "28px",
+        "fontSize": "sm",
+        "fontWeight": "semibold",
+        "labelFontSize": "sm",
+        "labelFontWeight": "medium",
+        "gap": "6px",
+        "states": {
+          "pending": {
+            "circleBg": "neutral.100",
+            "circleColor": "text.muted",
+            "circleBorder": "border.default",
+            "labelColor": "text.muted"
+          },
+          "active": {
+            "circleBg": "primary.600",
+            "circleColor": "neutral.0",
+            "circleBorder": "primary.600",
+            "labelColor": "primary.600"
+          },
+          "completed": {
+            "circleBg": "primary.600",
+            "circleColor": "neutral.0",
+            "showCheckIcon": true
+          }
+        }
+      }
+    },
+
+    "input": {
+      "description": "Standard labeled text input",
+      "label": {
+        "fontSize": "sm",
+        "fontWeight": "medium",
+        "color": "text.primary",
+        "marginBottom": "6px"
+      },
+      "field": {
+        "height": "40px",
+        "paddingX": "12px",
+        "paddingY": "8px",
+        "borderRadius": "md",
+        "border": "1px solid",
+        "fontSize": "sm",
+        "states": {
+          "default": {
+            "borderColor": "border.strong",
+            "background": "surface.card",
+            "color": "text.primary"
+          },
+          "placeholder": {
+            "color": "text.muted"
+          },
+          "focus": {
+            "borderColor": "border.focus",
+            "outline": "2px solid",
+            "outlineColor": "primary.100",
+            "outlineOffset": "0px"
+          },
+          "disabled": {
+            "background": "neutral.100",
+            "color": "text.muted"
+          }
+        }
+      }
+    },
+
+    "phoneInput": {
+      "description": "Phone input with country code flag dropdown + number field",
+      "height": "40px",
+      "borderRadius": "md",
+      "border": "1px solid border.strong",
+      "countrySelector": {
+        "width": "80px",
+        "paddingX": "10px",
+        "gap": "6px",
+        "flagSize": "18px",
+        "borderRight": "1px solid border.default"
+      },
+      "numberField": {
+        "flex": 1,
+        "paddingX": "12px",
+        "fontSize": "sm"
+      }
+    },
+
+    "selectionCard": {
+      "description": "Clickable card for mutually exclusive option selection (e.g. Single / Multi-agents)",
+      "padding": "12px 16px",
+      "borderRadius": "md",
+      "border": "1px solid",
+      "gap": "8px",
+      "iconSize": "20px",
+      "fontSize": "sm",
+      "fontWeight": "medium",
+      "states": {
+        "default": {
+          "borderColor": "border.default",
+          "background": "surface.card",
+          "color": "text.secondary"
+        },
+        "hover": {
+          "borderColor": "border.strong",
+          "background": "neutral.50"
+        },
+        "selected": {
+          "borderColor": "primary.600",
+          "background": "surface.card",
+          "color": "text.primary",
+          "showCheckmark": true,
+          "checkmarkColor": "primary.600",
+          "checkmarkSize": "16px"
+        }
+      }
+    },
+
+    "toggle": {
+      "description": "On/off boolean switch",
+      "track": {
+        "width": "44px",
+        "height": "24px",
+        "borderRadius": "full",
+        "states": {
+          "off": { "background": "neutral.300" },
+          "on":  { "background": "primary.600" }
+        }
+      },
+      "thumb": {
+        "size": "18px",
+        "background": "neutral.0",
+        "borderRadius": "full",
+        "shadow": "sm",
+        "transitionDuration": "200ms"
+      }
+    },
+
+    "badge": {
+      "description": "Inline label tags indicating plan tiers or status",
+      "paddingX": "8px",
+      "paddingY": "2px",
+      "borderRadius": "full",
+      "fontSize": "xs",
+      "fontWeight": "semibold",
+      "gap": "4px",
+      "variants": {
+        "ultimate": {
+          "background": "primary.600",
+          "color": "neutral.0",
+          "icon": "lock"
+        },
+        "success": {
+          "background": "semantic.successLight",
+          "color": "semantic.success"
+        },
+        "warning": {
+          "background": "semantic.warningLight",
+          "color": "semantic.warning"
+        }
+      }
+    },
+
+    "button": {
+      "description": "Action buttons in various roles",
+      "base": {
+        "height": "40px",
+        "paddingX": "16px",
+        "paddingY": "10px",
+        "borderRadius": "md",
+        "fontSize": "sm",
+        "fontWeight": "semibold",
+        "gap": "6px",
+        "transitionDuration": "150ms"
+      },
+      "variants": {
+        "primary": {
+          "background": "primary.600",
+          "color": "neutral.0",
+          "hover": { "background": "primary.700" },
+          "icon": "arrowRight"
+        },
+        "ghost": {
+          "background": "transparent",
+          "color": "text.secondary",
+          "hover": { "background": "neutral.100", "color": "text.primary" }
+        },
+        "whatsapp": {
+          "background": "brand.whatsapp",
+          "color": "neutral.0",
+          "hover": { "background": "brand.whatsappDark" },
+          "borderRadius": "lg",
+          "height": "44px",
+          "width": "100%"
+        },
+        "outline": {
+          "background": "surface.card",
+          "color": "text.secondary",
+          "border": "1px solid border.strong",
+          "hover": { "background": "neutral.50" }
+        }
+      }
+    },
+
+    "whatsappFab": {
+      "description": "Floating action button (WhatsApp icon bubble on page corner)",
+      "size": "56px",
+      "borderRadius": "full",
+      "background": "brand.whatsapp",
+      "iconColor": "neutral.0",
+      "iconSize": "28px",
+      "shadow": "lg",
+      "position": "fixed",
+      "bottom": "24px",
+      "right": "24px"
+    },
+
+    "contactWidget": {
+      "description": "WhatsApp contact form popup shown in the preview panel",
+      "width": "300px",
+      "borderRadius": "xl",
+      "shadow": "xl",
+      "header": {
+        "background": "brand.whatsapp",
+        "color": "neutral.0",
+        "padding": "16px",
+        "fontSize": "base",
+        "fontWeight": "semibold"
+      },
+      "body": {
+        "background": "surface.card",
+        "padding": "16px",
+        "gap": "10px"
+      },
+      "submitButton": "button.variants.whatsapp"
+    },
+
+    "previewPanel": {
+      "description": "Right-hand mock-browser preview shown alongside the form wizard",
+      "browserChrome": {
+        "background": "neutral.50",
+        "borderRadius": "lg",
+        "padding": "8px",
+        "dotSize": "10px",
+        "dots": ["#FF5F57", "#FEBC2E", "#28C840"]
+      },
+      "viewport": {
+        "background": "neutral.100",
+        "borderRadius": "md",
+        "minHeight": "400px"
+      }
+    },
+
+    "card": {
+      "description": "General surface container",
+      "background": "surface.card",
+      "borderRadius": "lg",
+      "border": "1px solid border.default",
+      "shadow": "card",
+      "padding": "24px"
+    },
+
+    "richTextToolbar": {
+      "description": "Formatting toolbar above message template textarea",
+      "height": "36px",
+      "paddingX": "8px",
+      "gap": "4px",
+      "border": "1px solid border.default",
+      "borderRadius": "md md 0 0",
+      "background": "neutral.50",
+      "buttonSize": "28px",
+      "buttonBorderRadius": "sm",
+      "buttonHoverBg": "neutral.200"
+    },
+
+    "textarea": {
+      "paddingX": "12px",
+      "paddingY": "10px",
+      "border": "1px solid border.default",
+      "borderTop": "none",
+      "borderRadius": "0 0 md md",
+      "fontSize": "sm",
+      "minHeight": "96px",
+      "background": "surface.card",
+      "color": "text.primary"
+    }
+  },
+
+  "patterns": {
+    "wizardLayout": {
+      "description": "Full-page multi-step form with live preview panel",
+      "structure": "two-column: [form 55%] [preview 45%]",
+      "header": {
+        "title": "pageTitle",
+        "stepIndicator": "stepIndicator",
+        "borderBottom": "border.default",
+        "paddingBottom": "20px"
+      },
+      "footer": {
+        "actions": ["ghost:Cancel", "link:Try premium", "outline:Previous", "primary:Next"],
+        "borderTop": "border.default",
+        "paddingTop": "20px",
+        "layout": "space-between"
+      }
+    },
+    "formSection": {
+      "description": "A titled group of form fields",
+      "titleSize": "lg",
+      "titleWeight": "semibold",
+      "gap": "16px",
+      "marginBottom": "24px"
+    }
+  },
+
+  "motion": {
+    "duration": {
+      "fast":   "100ms",
+      "normal": "200ms",
+      "slow":   "350ms"
+    },
+    "easing": {
+      "default": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "in":      "cubic-bezier(0.4, 0, 1, 1)",
+      "out":     "cubic-bezier(0, 0, 0.2, 1)"
+    }
+  },
+
+  "icons": {
+    "library": "lucide-react",
+    "defaultSize": "16px",
+    "strokeWidth": 1.5,
+    "commonly_used": [
+      "LayoutDashboard", "FolderOpen", "Layout", "Image",
+      "MessageSquare", "Boxes", "Search", "Zap",
+      "Settings", "HelpCircle", "ChevronDown", "ChevronRight",
+      "Check", "Lock", "ArrowRight", "ArrowLeft",
+      "User", "Users", "Phone", "Mail"
+    ]
+  }
+}

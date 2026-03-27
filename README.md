@@ -16,6 +16,16 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+### Desenvolvimento (Turbopack)
+
+Se aparecerem erros `ENOENT` em `.next/static/...` ou o dev server ficar instável, limpe a cache e reinicie:
+
+```bash
+rm -rf .next && npm run dev
+```
+
+Variável opcional: `WABA_TEMPLATES_CACHE_SECONDS` (mínimo 30) controla o TTL do cache server-side da listagem de templates (Meta Graph API).
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
