@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookUser, CheckCircle2, ListPlus, Plus, X } from "lucide-react";
+import {
+  AlertCircle,
+  BookUser,
+  CheckCircle2,
+  FileUp,
+  ListPlus,
+  Plus,
+  X,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import type { SerializedContactDto } from "@/lib/contacts/dto";
@@ -36,6 +44,7 @@ import {
 } from "@/components/contacts/ContactFormModal";
 import { BulkCustomValueInput } from "./BulkCustomValueInput";
 import { BulkTagSearchField } from "./BulkTagSearchField";
+import { ContactImportWizard } from "./ContactImportWizard";
 
 type Props = {
   tenantId: string;
@@ -102,11 +111,14 @@ export function ContactsPageClient({
   const [bulkSuccessMessage, setBulkSuccessMessage] = useState<string | null>(
     null,
   );
+  const [bulkErrorMessage, setBulkErrorMessage] = useState<string | null>(null);
   const bulkFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const bulkErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showBulkSuccess = useCallback((message: string) => {
+    setBulkErrorMessage(null);
     if (bulkFeedbackTimerRef.current) {
       clearTimeout(bulkFeedbackTimerRef.current);
       bulkFeedbackTimerRef.current = null;
@@ -126,10 +138,76 @@ export function ContactsPageClient({
     setBulkSuccessMessage(null);
   }, []);
 
+  const showBulkError = useCallback((message: string) => {
+    setBulkSuccessMessage(null);
+    if (bulkErrorTimerRef.current) {
+      clearTimeout(bulkErrorTimerRef.current);
+      bulkErrorTimerRef.current = null;
+    }
+    setBulkErrorMessage(message);
+    bulkErrorTimerRef.current = setTimeout(() => {
+      setBulkErrorMessage(null);
+      bulkErrorTimerRef.current = null;
+    }, 9000);
+  }, []);
+
+  const dismissBulkError = useCallback(() => {
+    if (bulkErrorTimerRef.current) {
+      clearTimeout(bulkErrorTimerRef.current);
+      bulkErrorTimerRef.current = null;
+    }
+    setBulkErrorMessage(null);
+  }, []);
+
+  type BulkJobResultPayload = {
+    op: string;
+    requestedContactIds: number;
+    validContactIds: number;
+  };
+
+  type BulkPollOutcome =
+    | { kind: "completed"; result: BulkJobResultPayload | null }
+    | { kind: "failed"; reason: string | null }
+    | { kind: "timeout" };
+
+  const pollBulkJobUntilDone = useCallback(
+    async (jobId: string): Promise<BulkPollOutcome> => {
+      const url = `${bulkApi}/${encodeURIComponent(jobId)}`;
+      const deadline = Date.now() + 180_000;
+      let nextWaitMs = 1200;
+      const maxWaitMs = 5000;
+      while (Date.now() < deadline) {
+        const res = await fetch(url);
+        if (!res.ok) {
+          return { kind: "failed", reason: t("bulkJobStatusError") };
+        }
+        const j = (await res.json()) as {
+          state: string;
+          failedReason?: string | null;
+          result?: BulkJobResultPayload | null;
+        };
+        if (j.state === "completed") {
+          return { kind: "completed", result: j.result ?? null };
+        }
+        if (j.state === "failed") {
+          return { kind: "failed", reason: j.failedReason ?? null };
+        }
+        const w = nextWaitMs;
+        nextWaitMs = Math.min(maxWaitMs, Math.round(nextWaitMs * 1.5));
+        await new Promise((r) => setTimeout(r, w));
+      }
+      return { kind: "timeout" };
+    },
+    [bulkApi, t],
+  );
+
   useEffect(() => {
     return () => {
       if (bulkFeedbackTimerRef.current) {
         clearTimeout(bulkFeedbackTimerRef.current);
+      }
+      if (bulkErrorTimerRef.current) {
+        clearTimeout(bulkErrorTimerRef.current);
       }
     };
   }, []);
@@ -150,6 +228,7 @@ export function ContactsPageClient({
   const [bulkCustomFieldId, setBulkCustomFieldId] = useState("");
   const [bulkCustomValueRaw, setBulkCustomValueRaw] = useState("");
   const [bulkOpBusy, setBulkOpBusy] = useState(false);
+  const [importWizardOpen, setImportWizardOpen] = useState(false);
 
   const hasActiveFilters = useMemo(
     () => hasMeaningfulFilters(appliedFilters),
@@ -222,6 +301,62 @@ export function ContactsPageClient({
     setNextCursor(j.nextCursor);
     if (typeof j.total === "number") setTotalCount(j.total);
   }, [applyListFromServer, appliedFilters]);
+
+  const refreshOrganizationTotal = useCallback(async () => {
+    const qs = buildContactsListQuery(emptyContactsListFilter(), {
+      limit: CONTACTS_LIST_PAGE_SIZE,
+      includeTotal: true,
+    });
+    const res = await fetch(`${api}?${qs}`);
+    if (!res.ok) return;
+    const j = (await res.json()) as { total?: number };
+    if (typeof j.total === "number") setOrganizationTotal(j.total);
+  }, [api]);
+
+  const runQueuedBulkOp = useCallback(
+    async (body: object, successMessage: string): Promise<boolean> => {
+      setBulkOpBusy(true);
+      const res = await fetch(bulkApi, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        setBulkOpBusy(false);
+        return false;
+      }
+      if (res.status !== 202) {
+        setBulkOpBusy(false);
+        return false;
+      }
+      const queued = (await res.json()) as { jobId?: string };
+      if (!queued.jobId) {
+        setBulkOpBusy(false);
+        return false;
+      }
+      const outcome = await pollBulkJobUntilDone(queued.jobId);
+      setBulkOpBusy(false);
+      setBulkExtra(null);
+      await refreshFirstPage();
+      setSelectedIds(new Set());
+      if (outcome.kind === "completed") {
+        showBulkSuccess(successMessage);
+      } else if (outcome.kind === "failed") {
+        showBulkError(outcome.reason ?? t("bulkJobFailed"));
+      } else {
+        showBulkSuccess(t("bulkJobTimeoutHint"));
+      }
+      return true;
+    },
+    [
+      bulkApi,
+      pollBulkJobUntilDone,
+      refreshFirstPage,
+      showBulkError,
+      showBulkSuccess,
+      t,
+    ],
+  );
 
   async function handleApplyFilters() {
     setListBusy(true);
@@ -308,11 +443,9 @@ export function ContactsPageClient({
       contacts.length > 0 &&
       contacts.every((c) => selectedIds.has(c.id));
     if (allSelected) {
-      setSelectedIds((prev) => {
-        const n = new Set(prev);
-        for (const c of contacts) n.delete(c.id);
-        return n;
-      });
+      // Só remover os IDs da lista carregada deixaria seleções vindas de
+      // "Todos na organização" / "Todos filtrados" (fora do client) marcadas.
+      setSelectedIds(new Set());
       return;
     }
     setSelectedIds((prev) => {
@@ -386,16 +519,40 @@ export function ContactsPageClient({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ op: "delete", ids }),
     });
+    if (!res.ok) {
+      setBulkBusy(false);
+      return;
+    }
+    if (res.status !== 202) {
+      setBulkBusy(false);
+      return;
+    }
+    const queued = (await res.json()) as { jobId?: string };
+    if (!queued.jobId) {
+      setBulkBusy(false);
+      return;
+    }
+    const outcome = await pollBulkJobUntilDone(queued.jobId);
     setBulkBusy(false);
-    if (!res.ok) return;
-    const idSet = new Set(ids);
-    setContacts((prev) => prev.filter((c) => !idSet.has(c.id)));
-    setTotalCount((n) => Math.max(0, n - ids.length));
-    setOrganizationTotal((n) => Math.max(0, n - ids.length));
+    setBulkDeleteOpen(false);
     setSelectedIds(new Set());
     setSelectionNotice(null);
-    setBulkDeleteOpen(false);
-    showBulkSuccess(t("bulkFeedbackDeleted"));
+    await refreshFirstPage();
+    if (outcome.kind === "completed") {
+      const r = outcome.result;
+      if (
+        r &&
+        r.op === "delete" &&
+        typeof r.validContactIds === "number"
+      ) {
+        setOrganizationTotal((n) => Math.max(0, n - r.validContactIds));
+      }
+      showBulkSuccess(t("bulkFeedbackDeleted"));
+    } else if (outcome.kind === "failed") {
+      showBulkError(outcome.reason ?? t("bulkJobFailed"));
+    } else {
+      showBulkSuccess(t("bulkJobTimeoutHint"));
+    }
   }
 
   function openBulkAddTags() {
@@ -479,22 +636,10 @@ export function ContactsPageClient({
     if (bulkExtra.kind === "add_tags" || bulkExtra.kind === "remove_tags") {
       const tagIds = [...bulkTagPick];
       if (tagIds.length === 0) return;
-      setBulkOpBusy(true);
-      const res = await fetch(bulkApi, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          bulkExtra.kind === "add_tags"
-            ? { op: "add_tags", ids, tagIds }
-            : { op: "remove_tags", ids, tagIds },
-        ),
-      });
-      setBulkOpBusy(false);
-      if (!res.ok) return;
-      setBulkExtra(null);
-      await refreshFirstPage();
-      setSelectedIds(new Set());
-      showBulkSuccess(
+      await runQueuedBulkOp(
+        bulkExtra.kind === "add_tags"
+          ? { op: "add_tags", ids, tagIds }
+          : { op: "remove_tags", ids, tagIds },
         bulkExtra.kind === "add_tags"
           ? t("bulkFeedbackTagsAdded")
           : t("bulkFeedbackTagsRemoved"),
@@ -505,22 +650,10 @@ export function ContactsPageClient({
     if (bulkExtra.kind === "add_lists" || bulkExtra.kind === "remove_lists") {
       const listIds = [...bulkListPick];
       if (listIds.length === 0) return;
-      setBulkOpBusy(true);
-      const res = await fetch(bulkApi, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          bulkExtra.kind === "add_lists"
-            ? { op: "add_to_lists", ids, listIds }
-            : { op: "remove_from_lists", ids, listIds },
-        ),
-      });
-      setBulkOpBusy(false);
-      if (!res.ok) return;
-      setBulkExtra(null);
-      await refreshFirstPage();
-      setSelectedIds(new Set());
-      showBulkSuccess(
+      await runQueuedBulkOp(
+        bulkExtra.kind === "add_lists"
+          ? { op: "add_to_lists", ids, listIds }
+          : { op: "remove_from_lists", ids, listIds },
         bulkExtra.kind === "add_lists"
           ? t("bulkFeedbackListsAdded")
           : t("bulkFeedbackListsRemoved"),
@@ -530,22 +663,14 @@ export function ContactsPageClient({
 
     if (bulkExtra.kind === "clear_custom") {
       if (!bulkCustomFieldId) return;
-      setBulkOpBusy(true);
-      const res = await fetch(bulkApi, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await runQueuedBulkOp(
+        {
           op: "clear_custom_field",
           ids,
           fieldId: bulkCustomFieldId,
-        }),
-      });
-      setBulkOpBusy(false);
-      if (!res.ok) return;
-      setBulkExtra(null);
-      await refreshFirstPage();
-      setSelectedIds(new Set());
-      showBulkSuccess(t("bulkFeedbackCustomCleared"));
+        },
+        t("bulkFeedbackCustomCleared"),
+      );
       return;
     }
 
@@ -563,23 +688,15 @@ export function ContactsPageClient({
       ) {
         return;
       }
-      setBulkOpBusy(true);
-      const res = await fetch(bulkApi, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await runQueuedBulkOp(
+        {
           op: "set_custom_field",
           ids,
           fieldId: bulkCustomFieldId,
           value: normalized.value,
-        }),
-      });
-      setBulkOpBusy(false);
-      if (!res.ok) return;
-      setBulkExtra(null);
-      await refreshFirstPage();
-      setSelectedIds(new Set());
-      showBulkSuccess(t("bulkFeedbackCustomSet"));
+        },
+        t("bulkFeedbackCustomSet"),
+      );
     }
   }
 
@@ -641,14 +758,24 @@ export function ContactsPageClient({
             </div>
           </div>
           {!readOnly ? (
-            <button
-              type="button"
-              className="ds-btn-primary shrink-0 gap-2"
-              onClick={() => setModal({ mode: "create" })}
-            >
-              <Plus className="h-4 w-4" strokeWidth={2} />
-              {t("newContact")}
-            </button>
+            <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                className="ds-btn-outline gap-2"
+                onClick={() => setImportWizardOpen(true)}
+              >
+                <FileUp className="h-4 w-4" strokeWidth={2} aria-hidden />
+                {t("importCsv")}
+              </button>
+              <button
+                type="button"
+                className="ds-btn-primary gap-2"
+                onClick={() => setModal({ mode: "create" })}
+              >
+                <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
+                {t("newContact")}
+              </button>
+            </div>
           ) : null}
         </div>
       </header>
@@ -735,6 +862,30 @@ export function ContactsPageClient({
                 className="shrink-0 rounded-md p-1 text-emerald-800 hover:bg-emerald-100/80"
                 aria-label={t("bulkFeedbackDismiss")}
                 onClick={dismissBulkSuccess}
+              >
+                <X className="h-4 w-4" strokeWidth={2} aria-hidden />
+              </button>
+            </div>
+          ) : null}
+
+          {bulkErrorMessage ? (
+            <div
+              className="flex items-start gap-3 rounded-lg border border-red-300/90 bg-red-50 px-3 py-2.5 shadow-sm"
+              role="alert"
+            >
+              <AlertCircle
+                className="mt-0.5 h-5 w-5 shrink-0 text-red-700"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+              <p className="min-w-0 flex-1 text-sm font-medium text-red-950">
+                {bulkErrorMessage}
+              </p>
+              <button
+                type="button"
+                className="shrink-0 rounded-md p-1 text-red-800 hover:bg-red-100/80"
+                aria-label={t("bulkErrorDismiss")}
+                onClick={dismissBulkError}
               >
                 <X className="h-4 w-4" strokeWidth={2} aria-hidden />
               </button>
@@ -952,6 +1103,27 @@ export function ContactsPageClient({
           </div>
         </div>
       ) : null}
+
+      <ContactImportWizard
+        open={importWizardOpen}
+        onClose={() => setImportWizardOpen(false)}
+        tenantId={tenantId}
+        fieldDefs={fieldDefs.map((d) => ({
+          id: d.id,
+          label: d.label,
+          fieldType: d.fieldType as FieldType,
+        }))}
+        allTags={allTags}
+        onFinished={async (detail) => {
+          await refreshFirstPage();
+          await refreshOrganizationTotal();
+          if (detail.status === "timeout") {
+            showBulkSuccess(t("bulkJobTimeoutHint"));
+          } else {
+            showBulkSuccess(t("importDone"));
+          }
+        }}
+      />
     </div>
   );
 }
