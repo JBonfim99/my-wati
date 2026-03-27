@@ -140,9 +140,10 @@ export async function processBulkContactsJob(
 ): Promise<BulkJobResult> {
   const parsed = bulkContactsJobSchema.safeParse(job.data);
   if (!parsed.success) {
-    throw new UnrecoverableError(
-      parsed.error.issues[0]?.message ?? "Payload do job inválido",
-    );
+    const first = parsed.error.issues[0];
+    const path = first?.path?.length ? first.path.join(".") : "root";
+    const msg = first?.message ?? "Payload do job inválido";
+    throw new UnrecoverableError(`Bulk job: ${path}: ${msg}`);
   }
   const data = parsed.data;
   const db = getDb();
