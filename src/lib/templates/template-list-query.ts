@@ -1,5 +1,6 @@
 import type { MessageTemplateRecord } from "@/lib/meta/graph";
 import { DB_TEMPLATE_DRAFT_STATUS } from "@/lib/meta/template-create-payload";
+import type { WabaTemplateStatusSnapshotRow } from "@/lib/templates/waba-template-snapshot-queries";
 
 export const TEMPLATES_LIST_PAGE_SIZE = 25;
 export const TEMPLATES_LIST_PAGE_MAX = 100;
@@ -55,6 +56,33 @@ export function mergeTemplatesSorted(
     const tb = templateUpdatedMs(b);
     if (ta !== tb) return tb - ta;
     return (a.name ?? "").localeCompare(b.name ?? "", "pt-BR");
+  });
+}
+
+/**
+ * Sobrepõe status / última atualização / rejeição a partir do último webhook da Meta.
+ */
+export function applyTemplateWebhookOverlay(
+  meta: MessageTemplateRecord[],
+  snapshots: WabaTemplateStatusSnapshotRow[],
+): MessageTemplateRecord[] {
+  if (snapshots.length === 0) return meta;
+  const byId = new Map(snapshots.map((s) => [s.metaTemplateId, s]));
+  return meta.map((t) => {
+    const id = t.id?.trim();
+    if (!id) return t;
+    const snap = byId.get(id);
+    if (!snap) return t;
+    const next: MessageTemplateRecord = { ...t, status: snap.status };
+    const ms = snap.webhookTime.getTime();
+    next.last_updated_time = String(ms);
+    if (snap.category?.trim()) next.category = snap.category;
+    if (snap.rejectionInfo?.reason) {
+      next.rejected_reason = { message: snap.rejectionInfo.reason };
+    } else if (snap.status === "REJECTED" && snap.reason?.trim()) {
+      next.rejected_reason = { message: snap.reason };
+    }
+    return next;
   });
 }
 

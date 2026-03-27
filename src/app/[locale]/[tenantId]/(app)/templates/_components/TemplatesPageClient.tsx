@@ -30,6 +30,7 @@ import {
   TEMPLATE_FILTER_STATUS_VALUES,
   type TemplatesListSortKey,
 } from "@/lib/templates/template-list-query";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { TemplateViewModal } from "./TemplateViewModal";
 import { TemplateEditModal } from "./TemplateEditModal";
 
@@ -268,6 +269,39 @@ export function TemplatesPageClient({
 
   const fetchListRef = useRef(fetchList);
   fetchListRef.current = fetchList;
+
+  useEffect(() => {
+    const supabase = createSupabaseBrowserClient();
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleRefetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        void fetchListRef.current(true);
+      }, 400);
+    };
+
+    const channel = supabase
+      .channel(`waba-template-snapshots:${tenantId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "waba_template_status_snapshots",
+          filter: `tenant_id=eq.${tenantId}`,
+        },
+        () => {
+          scheduleRefetch();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      void supabase.removeChannel(channel);
+    };
+  }, [tenantId]);
 
   useEffect(() => {
     if (skipNextFilterFetch.current) {

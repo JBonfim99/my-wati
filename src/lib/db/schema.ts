@@ -295,6 +295,36 @@ export const messageTemplateDrafts = pgTable(
   (t) => [index("message_template_drafts_tenant_idx").on(t.tenantId)],
 );
 
+/** Último estado notificado pela Meta (webhook message_template_status_update). */
+export const wabaTemplateStatusSnapshots = pgTable(
+  "waba_template_status_snapshots",
+  {
+    tenantId: bigint("tenant_id", { mode: "number" })
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    metaTemplateId: text("meta_template_id").notNull(),
+    templateName: text("template_name").notNull(),
+    language: text("language").notNull().default(""),
+    category: text("category"),
+    status: text("status").notNull(),
+    reason: text("reason"),
+    rejectionInfo: jsonb("rejection_info").$type<{
+      reason?: string;
+      recommendation?: string;
+    } | null>(),
+    disableInfo: jsonb("disable_info").$type<unknown>(),
+    otherInfo: jsonb("other_info").$type<unknown>(),
+    webhookTime: timestamp("webhook_time", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.metaTemplateId] }),
+    index("waba_template_status_snapshots_tenant_idx").on(t.tenantId),
+  ],
+);
+
 export const campaigns = pgTable(
   "campaigns",
   {

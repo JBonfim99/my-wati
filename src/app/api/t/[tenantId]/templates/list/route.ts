@@ -10,6 +10,7 @@ import {
 import { requireTenantContext } from "@/lib/api-tenant-context";
 import { listMessageTemplateDrafts } from "@/lib/templates/template-draft-queries";
 import {
+  applyTemplateWebhookOverlay,
   decodeTemplatesListCursor,
   filterTemplatesList,
   mergeTemplatesSorted,
@@ -19,6 +20,7 @@ import {
   type TemplatesListFilters,
   type TemplatesListSortKey,
 } from "@/lib/templates/template-list-query";
+import { listWabaTemplateStatusSnapshots } from "@/lib/templates/waba-template-snapshot-queries";
 
 type RouteCtx = { params: Promise<{ tenantId: string }> };
 
@@ -96,7 +98,10 @@ export async function GET(req: NextRequest, route: RouteCtx) {
     }
   }
 
-  const draftRows = await listMessageTemplateDrafts(db, ctx.tenantId);
+  const [draftRows, wabaSnapshots] = await Promise.all([
+    listMessageTemplateDrafts(db, ctx.tenantId),
+    listWabaTemplateStatusSnapshots(db, ctx.tenantId),
+  ]);
   const draftRecords = draftRows.map((r) =>
     draftRowToMessageTemplateRecord({
       id: r.id,
@@ -105,7 +110,11 @@ export async function GET(req: NextRequest, route: RouteCtx) {
     }),
   );
 
-  const merged = mergeTemplatesSorted(metaTemplates, draftRecords);
+  const metaWithWebhook = applyTemplateWebhookOverlay(
+    metaTemplates,
+    wabaSnapshots,
+  );
+  const merged = mergeTemplatesSorted(metaWithWebhook, draftRecords);
   const filtered = filterTemplatesList(merged, filters);
   const { page, nextCursor, total } = sliceTemplatesPage(
     filtered,

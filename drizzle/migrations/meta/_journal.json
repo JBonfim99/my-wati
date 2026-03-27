@@ -50,6 +50,13 @@
       "when": 1774610000000,
       "tag": "0006_tenant_fixed_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1774620000000,
+      "tag": "0007_waba_template_status_snapshots",
+      "breakpoints": true
     }
   ]
 }
