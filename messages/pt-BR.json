@@ -727,6 +727,7 @@
       "overviewPageOf": "Página {page} de {totalPages} · {total, plural, one {# campanha} other {# campanhas}}",
       "overviewPrev": "Anterior",
       "overviewNext": "Seguinte",
+      "colActions": "Ações",
       "colCampaign": "Campanha",
       "colRecipients": "Destinatários",
       "colSentOk": "Enviados OK",
@@ -756,14 +757,20 @@
         "distPending": "Na fila / processando",
         "responsesSectionTitle": "Distribuição de respostas",
         "responsesPlaceholder": "Respostas interativas e métricas adicionais virão depois.",
-        "templatePreview": "Visualização do modelo"
+        "templatePreview": "Visualização do modelo",
+        "cancelQueue": "Cancelar fila de envio",
+        "cancelConfirm": "Cancelar esta campanha? Os jobs na fila (incl. agendados) serão removidos e nenhuma mensagem será enviada.",
+        "cancelError": "Não foi possível cancelar.",
+        "cancelBusy": "A cancelar…"
       },
       "status": {
         "draft": "Rascunho",
         "queued": "Na fila",
+        "scheduled": "Agendada",
         "sending": "Enviando",
         "completed": "Concluída",
-        "failed": "Falhou"
+        "failed": "Falhou",
+        "cancelled": "Cancelada"
       }
     },
     "settings": {

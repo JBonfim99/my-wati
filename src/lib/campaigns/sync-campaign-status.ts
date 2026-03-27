@@ -29,7 +29,7 @@ export async function syncCampaignFinishedStatus(campaignId: string): Promise<vo
     .where(
       and(
         eq(campaigns.id, campaignId),
-        inArray(campaigns.status, ["queued", "sending"]),
+        inArray(campaigns.status, ["queued", "scheduled", "sending"]),
       ),
     );
 }

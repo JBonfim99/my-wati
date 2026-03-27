@@ -22,7 +22,15 @@ const queryListSchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   status: z
-    .enum(["draft", "queued", "sending", "completed", "failed"])
+    .enum([
+      "draft",
+      "queued",
+      "scheduled",
+      "sending",
+      "completed",
+      "failed",
+      "cancelled",
+    ])
     .optional(),
   q: z.string().max(200).optional(),
   template: z.string().max(200).optional(),
@@ -202,7 +210,7 @@ export async function POST(req: NextRequest, route: RouteCtx) {
       templateLanguage: body.templateLanguage ?? "pt_BR",
       templateComponents: body.templateComponents ?? null,
       listId: body.listId,
-      status: "queued",
+      status: delayMs > 0 ? "scheduled" : "queued",
       scheduledAt: delayMs > 0 ? scheduledAtDate : null,
       createdBy: ctx.userId,
     })

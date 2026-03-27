@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link, usePathname, useRouter } from "@/i18n/navigation";
+import { dispatchCampaignsListMutated } from "@/lib/campaigns/campaigns-mutated-event";
 import { Loader2 } from "lucide-react";
 import type { MessageTemplateRecord } from "@/lib/meta/graph";
 import { parseTemplatePreviewModel } from "@/lib/meta/template-preview-model";
@@ -255,6 +256,8 @@ export function NewCampaignForm({ tenantId, initialLists }: Props) {
       }
       setReviewOpen(false);
       router.push(`/${tenantId}/campaigns`);
+      router.refresh();
+      queueMicrotask(() => dispatchCampaignsListMutated());
     } catch {
       setFormError(t("submitError"));
     } finally {

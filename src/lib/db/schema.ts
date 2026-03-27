@@ -23,9 +23,11 @@ export const membershipRoleEnum = pgEnum("membership_role", [
 export const campaignStatusEnum = pgEnum("campaign_status", [
   "draft",
   "queued",
+  "scheduled",
   "sending",
   "completed",
   "failed",
+  "cancelled",
 ]);
 
 export const recipientStatusEnum = pgEnum("recipient_status", [

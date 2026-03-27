@@ -11,6 +11,7 @@ import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import {
+  Ban,
   Check,
   CheckCheck,
   ChevronLeft,
@@ -23,6 +24,10 @@ import {
   Signal,
   XCircle,
 } from "lucide-react";
+import {
+  CAMPAIGNS_LIST_MUTATED_EVENT,
+  dispatchCampaignsListMutated,
+} from "@/lib/campaigns/campaigns-mutated-event";
 import { uniqueRecipientsPer24hFromTier } from "@/lib/meta/whatsapp-display-limits";
 import { CampaignMetricMicroBar } from "./CampaignMetricMicroBar";
 
@@ -65,9 +70,11 @@ function statusLabel(
   const keys = [
     "draft",
     "queued",
+    "scheduled",
     "sending",
     "completed",
     "failed",
+    "cancelled",
   ] as const;
   if (keys.includes(status as (typeof keys)[number])) {
     return t(`status.${status as (typeof keys)[number]}`);
@@ -81,6 +88,10 @@ function statusPillClass(status: string): string {
       return "bg-emerald-600 text-white ring-1 ring-emerald-800/40";
     case "failed":
       return "bg-red-600 text-white ring-1 ring-red-900/35";
+    case "cancelled":
+      return "bg-neutral-500 text-white ring-1 ring-neutral-800/35";
+    case "scheduled":
+      return "bg-amber-600 text-white ring-1 ring-amber-900/35";
     case "sending":
     case "queued":
       return "bg-sky-600 text-white ring-1 ring-sky-900/30";
@@ -100,6 +111,10 @@ function qualityTone(
   if (u === "RED")
     return { className: "bg-red-600 text-white ring-1 ring-red-900/35", label: "RED" };
   return { className: "bg-neutral-500 text-white ring-1 ring-neutral-800/30", label: q ?? "—" };
+}
+
+function mayCancelCampaignRow(status: string): boolean {
+  return status === "scheduled" || status === "queued";
 }
 
 function formatPctOfTotal(value: number, total: number): string | null {
@@ -151,6 +166,7 @@ function KpiCard({ icon, label, value, accent, pctLine }: KpiProps) {
 
 export function CampaignsOverviewClient() {
   const t = useTranslations("app.campaigns");
+  const tDetail = useTranslations("app.campaigns.detail");
   const params = useParams<{ tenantId: string }>();
   const tenantId = params.tenantId;
 
@@ -172,6 +188,7 @@ export function CampaignsOverviewClient() {
     error?: string;
   } | null>(null);
   const [listBusy, setListBusy] = useState(false);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -248,6 +265,43 @@ export function CampaignsOverviewClient() {
   useEffect(() => {
     void loadList();
   }, [loadList]);
+
+  useEffect(() => {
+    const onMutated = () => void loadList();
+    window.addEventListener(CAMPAIGNS_LIST_MUTATED_EVENT, onMutated);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadList();
+    }, 25000);
+    return () => {
+      window.removeEventListener(CAMPAIGNS_LIST_MUTATED_EVENT, onMutated);
+      window.clearInterval(intervalId);
+    };
+  }, [loadList]);
+
+  const cancelCampaignFromRow = useCallback(
+    async (campaignId: string) => {
+      if (!window.confirm(tDetail("cancelConfirm"))) return;
+      setCancellingId(campaignId);
+      try {
+        const res = await fetch(
+          `/api/t/${tenantId}/campaigns/${campaignId}/cancel`,
+          { method: "POST" },
+        );
+        const j = (await res.json()) as { error?: string };
+        if (!res.ok) {
+          window.alert(j.error ?? tDetail("cancelError"));
+          return;
+        }
+        dispatchCampaignsListMutated();
+        await loadList();
+      } catch {
+        window.alert(tDetail("cancelError"));
+      } finally {
+        setCancellingId(null);
+      }
+    },
+    [tenantId, loadList, tDetail],
+  );
 
   const phoneData = phone?.ok ? phone.data : null;
   const qTone = qualityTone(
@@ -484,9 +538,11 @@ export function CampaignsOverviewClient() {
             <option value="">{t("overviewAllStatuses")}</option>
             <option value="draft">{t("status.draft")}</option>
             <option value="queued">{t("status.queued")}</option>
+            <option value="scheduled">{t("status.scheduled")}</option>
             <option value="sending">{t("status.sending")}</option>
             <option value="completed">{t("status.completed")}</option>
             <option value="failed">{t("status.failed")}</option>
+            <option value="cancelled">{t("status.cancelled")}</option>
           </select>
           <select
             className="ds-select !min-w-[10rem] shrink-0 !py-2 text-sm"
@@ -531,7 +587,7 @@ export function CampaignsOverviewClient() {
         </div>
 
         <div className="overflow-x-auto rounded-2xl border border-border bg-card shadow-card">
-          <table className="min-w-[880px] w-full border-collapse text-left text-sm">
+          <table className="min-w-[940px] w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-border bg-neutral-50/90 text-xs font-semibold uppercase tracking-wide text-fg-secondary">
                 <th className="px-4 py-3">{t("colCampaign")}</th>
@@ -541,18 +597,21 @@ export function CampaignsOverviewClient() {
                 <th className="px-4 py-3 text-right">{t("colFailed")}</th>
                 <th className="px-4 py-3">{t("colStatus")}</th>
                 <th className="px-4 py-3">{t("colSent")}</th>
+                <th className="w-px whitespace-nowrap px-4 py-3 text-right">
+                  {t("colActions")}
+                </th>
               </tr>
             </thead>
             <tbody>
               {listBusy && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-fg-muted">
+                  <td colSpan={8} className="px-4 py-16 text-center text-fg-muted">
                     <Loader2 className="mx-auto h-8 w-8 animate-spin opacity-40" />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-fg-secondary">
+                  <td colSpan={8} className="px-4 py-12 text-center text-fg-secondary">
                     {t("overviewEmpty")}
                   </td>
                 </tr>
@@ -664,6 +723,36 @@ export function CampaignsOverviewClient() {
                             timeStyle: "short",
                           })
                         : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {mayCancelCampaignRow(c.status) ? (
+                        <button
+                          type="button"
+                          disabled={
+                            cancellingId === c.id || listBusy
+                          }
+                          onClick={() => void cancelCampaignFromRow(c.id)}
+                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-xs font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-45"
+                          title={tDetail("cancelQueue")}
+                          aria-label={tDetail("cancelQueue")}
+                        >
+                          {cancellingId === c.id ? (
+                            <Loader2
+                              className="h-4 w-4 shrink-0 animate-spin"
+                              aria-hidden
+                            />
+                          ) : (
+                            <Ban className="h-4 w-4 shrink-0" aria-hidden />
+                          )}
+                          <span className="hidden sm:inline">
+                            {cancellingId === c.id
+                              ? tDetail("cancelBusy")
+                              : tDetail("cancelQueue")}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="text-fg-muted">—</span>
+                      )}
                     </td>
                   </tr>
                   );

@@ -150,6 +150,10 @@ export type SendTemplatePayload = {
   to: string;
   templateName: string;
   languageCode: string;
+  /**
+   * Só o formato de **envio** Cloud API: `{ type: "body"|"header"|…", parameters: [...] }`.
+   * Nunca reutilizar o JSON de GET /message_templates (tem `text`, `format`, etc.).
+   */
   components?: unknown[];
 };
 

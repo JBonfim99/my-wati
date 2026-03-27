@@ -1,7 +1,7 @@
 import "dotenv/config";
 
 import { UnrecoverableError, Worker } from "bullmq";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { processBulkContactsJob } from "@/lib/contacts/bulk-job-processor";
 import type { BulkContactsJob } from "@/lib/contacts/bulk-schema";
 import { processContactsImportJob } from "@/lib/contacts/import-job-processor";
@@ -86,7 +86,10 @@ const worker = new Worker<CampaignSendJob>(
       .update(campaigns)
       .set({ status: "sending" })
       .where(
-        and(eq(campaigns.id, campaignRow.id), eq(campaigns.status, "queued")),
+        and(
+          eq(campaigns.id, campaignRow.id),
+          inArray(campaigns.status, ["queued", "scheduled"]),
+        ),
       );
 
     const token = decryptSecret(integrationRow.encryptedAccessToken);
@@ -96,6 +99,10 @@ const worker = new Worker<CampaignSendJob>(
       .set({ status: "sending", attempts: recipient.attempts + 1 })
       .where(eq(campaignRecipients.id, recipientId));
 
+    // Não enviar `template_components` da BD: vêm do GET message_templates (definição:
+    // text, format, example, …). Na Cloud API de envio só cabem componentes com
+    // `parameters` (valores das variáveis). Incluir a definição causa (#100) Unexpected key "text".
+    // Modelo sem variáveis: omitir `components`. Com variáveis: futuro mapeamento na criação da campanha.
     const result = await sendTemplateMessage(
       token,
       integrationRow.phoneNumberId,
@@ -103,7 +110,6 @@ const worker = new Worker<CampaignSendJob>(
         to: recipient.phoneE164,
         templateName: campaignRow.templateName,
         languageCode: campaignRow.templateLanguage,
-        components: (campaignRow.templateComponents as unknown[]) ?? undefined,
       },
       integrationRow.graphApiVersion,
     );

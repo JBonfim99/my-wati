@@ -125,29 +125,46 @@ export async function listCampaignsPaginated(
   const parts = [eq(campaigns.tenantId, tenantId)];
   const fsAt = campaignFirstSentAtSql();
 
+  /**
+   * Campanhas ainda sem envio têm `firstSentAt` null; filtrar só por isso exclui
+   * agendadas da listagem. Incluir `created_at` quando não há primeiro envio.
+   */
   if (filters.from) {
     const f = new Date(`${filters.from}T00:00:00.000Z`);
     if (!Number.isNaN(f.getTime())) {
-      parts.push(sql`${fsAt} >= ${f.toISOString()}`);
+      const iso = f.toISOString();
+      parts.push(sql`(
+        (${fsAt} is not null and ${fsAt} >= ${iso})
+        or
+        (${fsAt} is null and ${campaigns.createdAt} >= ${iso})
+      )`);
     }
   }
   if (filters.to) {
     const end = endOfDayUtc(filters.to);
-    parts.push(sql`${fsAt} <= ${end.toISOString()}`);
+    parts.push(sql`(
+      (${fsAt} is not null and ${fsAt} <= ${end.toISOString()})
+      or
+      (${fsAt} is null and ${campaigns.createdAt} <= ${end.toISOString()})
+    )`);
   }
+  const statusFilterValues = [
+    "draft",
+    "queued",
+    "scheduled",
+    "sending",
+    "completed",
+    "failed",
+    "cancelled",
+  ] as const;
   if (
     filters.status &&
-    ["draft", "queued", "sending", "completed", "failed"].includes(filters.status)
+    (statusFilterValues as readonly string[]).includes(filters.status)
   ) {
     parts.push(
       eq(
         campaigns.status,
-        filters.status as
-          | "draft"
-          | "queued"
-          | "sending"
-          | "completed"
-          | "failed",
+        filters.status as (typeof statusFilterValues)[number],
       ),
     );
   }
@@ -171,7 +188,9 @@ export async function listCampaignsPaginated(
     .select({ id: campaigns.id })
     .from(campaigns)
     .where(whereClause)
-    .orderBy(sql`${fsAt} desc nulls last`, desc(campaigns.createdAt))
+    .orderBy(
+      desc(sql`coalesce((${fsAt})::timestamptz, ${campaigns.createdAt})`),
+    )
     .limit(pageSize)
     .offset(offset);
 

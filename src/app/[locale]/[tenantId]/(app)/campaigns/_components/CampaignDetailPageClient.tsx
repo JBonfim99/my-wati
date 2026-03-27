@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { ArrowLeft, BarChart3 } from "lucide-react";
-import { Link } from "@/i18n/navigation";
+import { ArrowLeft, BarChart3, Ban } from "lucide-react";
+import { Link, useRouter } from "@/i18n/navigation";
+import { dispatchCampaignsListMutated } from "@/lib/campaigns/campaigns-mutated-event";
 import { parseTemplatePreviewModel } from "@/lib/meta/template-preview-model";
 import { META_DELIVERY_ANALYTICS_SUMMARY } from "@/lib/campaigns/meta-delivery-analytics-notes";
 import { WhatsAppTemplatePhonePreview } from "../../templates/_components/WhatsAppTemplatePhonePreview";
@@ -33,9 +34,11 @@ export type CampaignDetailDto = {
 const UI_CAMPAIGN_STATUSES = [
   "draft",
   "queued",
+  "scheduled",
   "sending",
   "completed",
   "failed",
+  "cancelled",
 ] as const;
 type UiCampaignStatus = (typeof UI_CAMPAIGN_STATUSES)[number];
 
@@ -58,8 +61,38 @@ function pct(n: number, total: number): string {
 }
 
 export function CampaignDetailPageClient({ tenantId, detail }: Props) {
+  const router = useRouter();
   const t = useTranslations("app.campaigns.detail");
   const tStatus = useTranslations("app.campaigns.status");
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelErr, setCancelErr] = useState<string | null>(null);
+
+  const mayCancelQueue =
+    detail.status === "scheduled" || detail.status === "queued";
+
+  async function cancelQueue() {
+    if (!mayCancelQueue) return;
+    if (!window.confirm(t("cancelConfirm"))) return;
+    setCancelErr(null);
+    setCancelBusy(true);
+    try {
+      const res = await fetch(
+        `/api/t/${tenantId}/campaigns/${detail.id}/cancel`,
+        { method: "POST" },
+      );
+      const j = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setCancelErr(j.error ?? t("cancelError"));
+        return;
+      }
+      dispatchCampaignsListMutated();
+      router.refresh();
+    } catch {
+      setCancelErr(t("cancelError"));
+    } finally {
+      setCancelBusy(false);
+    }
+  }
 
   const previewModel = useMemo(() => {
     const comps = detail.templateComponents;
@@ -173,6 +206,22 @@ export function CampaignDetailPageClient({ tenantId, detail }: Props) {
           </dl>
         </div>
         <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+          {mayCancelQueue ? (
+            <div className="flex w-full max-w-xs flex-col gap-2 sm:items-end">
+              <button
+                type="button"
+                disabled={cancelBusy}
+                onClick={() => void cancelQueue()}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-100 disabled:opacity-50"
+              >
+                <Ban className="h-4 w-4" aria-hidden />
+                {cancelBusy ? t("cancelBusy") : t("cancelQueue")}
+              </button>
+              {cancelErr ? (
+                <p className="text-xs text-red-700 sm:text-right">{cancelErr}</p>
+              ) : null}
+            </div>
+          ) : null}
           <button
             type="button"
             disabled
