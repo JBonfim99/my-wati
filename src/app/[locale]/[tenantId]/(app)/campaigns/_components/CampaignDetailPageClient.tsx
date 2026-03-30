@@ -27,6 +27,7 @@ export type CampaignDetailDto = {
     delivered: number;
     sent: number;
     failed: number;
+    cancelled: number;
     pending: number;
   };
 };
@@ -132,6 +133,12 @@ export function CampaignDetailPageClient({ tenantId, detail }: Props) {
           n: breakdown.failed,
           className: "bg-red-500",
           label: t("distFailed"),
+        },
+        {
+          key: "cancelled",
+          n: breakdown.cancelled,
+          className: "bg-neutral-500",
+          label: t("distCancelled"),
         },
         {
           key: "pending",

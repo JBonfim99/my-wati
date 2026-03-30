@@ -51,8 +51,8 @@ export async function cancelCampaignQueue(
     await tx
       .update(campaignRecipients)
       .set({
-        status: "failed",
-        lastError: JSON.stringify({ cancelled: true }),
+        status: "cancelled",
+        lastError: null,
         updatedAt: new Date(),
       })
       .where(eq(campaignRecipients.campaignId, campaignId));

@@ -24,6 +24,8 @@ export type CampaignListRow = {
   scheduledAt: Date | null;
   totalRecipients: number;
   sentOk: number;
+  /** Entregue no aparelho: `delivered` + `read`. */
+  deliveredCount: number;
   readCount: number;
   failedCount: number;
 };
@@ -204,6 +206,7 @@ export async function listCampaignsPaginated(
       campaignId: campaignRecipients.campaignId,
       totalRecipients: count(campaignRecipients.id),
       sentOk: sql<number>`coalesce(count(*) filter (where ${campaignRecipients.status} in ('sent', 'delivered', 'read')), 0)::int`,
+      deliveredCount: sql<number>`coalesce(count(*) filter (where ${campaignRecipients.status} in ('delivered', 'read')), 0)::int`,
       readCount: sql<number>`coalesce(count(*) filter (where ${campaignRecipients.status} = 'read'), 0)::int`,
       failedCount: sql<number>`coalesce(count(*) filter (where ${campaignRecipients.status} = 'failed'), 0)::int`,
     })
@@ -246,6 +249,7 @@ export async function listCampaignsPaginated(
       scheduledAt: c.scheduledAt ?? null,
       totalRecipients: s?.totalRecipients ?? 0,
       sentOk: s?.sentOk ?? 0,
+      deliveredCount: s?.deliveredCount ?? 0,
       readCount: s?.readCount ?? 0,
       failedCount: s?.failedCount ?? 0,
     };

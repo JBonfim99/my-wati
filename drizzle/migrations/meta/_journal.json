@@ -78,6 +78,13 @@
       "when": 1774650000000,
       "tag": "0010_campaign_status_scheduled_cancelled",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1774660000000,
+      "tag": "0011_recipient_status_cancelled",
+      "breakpoints": true
     }
   ]
 }

@@ -38,6 +38,7 @@ export const recipientStatusEnum = pgEnum("recipient_status", [
   "delivered",
   "read",
   "failed",
+  "cancelled",
 ]);
 
 export const contactFieldTypeEnum = pgEnum("contact_field_type", [

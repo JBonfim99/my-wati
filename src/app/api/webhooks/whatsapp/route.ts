@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { revalidateTag } from "next/cache";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   campaignRecipients,
@@ -357,6 +357,7 @@ export async function POST(req: NextRequest) {
               and(
                 eq(campaignRecipients.tenantId, integration.tenantId),
                 inArray(campaignRecipients.wamid, wamids),
+                ne(campaignRecipients.status, "cancelled"),
               ),
             ),
         ),

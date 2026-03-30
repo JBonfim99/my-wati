@@ -11,6 +11,8 @@ export type CampaignRecipientBreakdown = {
   /** Enviado à API WhatsApp, sem delivered/read ainda. */
   sent: number;
   failed: number;
+  /** Envio cancelado pelo utilizador (não conta como falha). */
+  cancelled: number;
   /** pending + queued + sending */
   pending: number;
 };
@@ -51,6 +53,7 @@ export async function getCampaignDetailForTenant(
       delivered: sql<number>`coalesce(count(*) filter (where ${campaignRecipients.status} = 'delivered'), 0)::int`,
       sent: sql<number>`coalesce(count(*) filter (where ${campaignRecipients.status} = 'sent'), 0)::int`,
       failed: sql<number>`coalesce(count(*) filter (where ${campaignRecipients.status} = 'failed'), 0)::int`,
+      cancelled: sql<number>`coalesce(count(*) filter (where ${campaignRecipients.status} = 'cancelled'), 0)::int`,
       pending: sql<number>`coalesce(count(*) filter (where ${campaignRecipients.status} in ('pending', 'queued', 'sending')), 0)::int`,
     })
     .from(campaignRecipients)
@@ -104,6 +107,7 @@ export async function getCampaignDetailForTenant(
       delivered: agg?.delivered ?? 0,
       sent: agg?.sent ?? 0,
       failed: agg?.failed ?? 0,
+      cancelled: agg?.cancelled ?? 0,
       pending: agg?.pending ?? 0,
     },
   };

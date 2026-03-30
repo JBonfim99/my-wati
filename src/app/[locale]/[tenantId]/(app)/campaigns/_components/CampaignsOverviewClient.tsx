@@ -41,6 +41,7 @@ type CampaignRow = {
   scheduledAt: string | null;
   totalRecipients: number;
   sentOk: number;
+  deliveredCount: number;
   readCount: number;
   failedCount: number;
 };
@@ -587,12 +588,13 @@ export function CampaignsOverviewClient() {
         </div>
 
         <div className="overflow-x-auto rounded-2xl border border-border bg-card shadow-card">
-          <table className="min-w-[940px] w-full border-collapse text-left text-sm">
+          <table className="min-w-[1040px] w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-border bg-neutral-50/90 text-xs font-semibold uppercase tracking-wide text-fg-secondary">
                 <th className="px-4 py-3">{t("colCampaign")}</th>
                 <th className="px-4 py-3 text-right">{t("colRecipients")}</th>
                 <th className="px-4 py-3 text-right">{t("colSentOk")}</th>
+                <th className="px-4 py-3 text-right">{t("colDelivered")}</th>
                 <th className="px-4 py-3 text-right">{t("colRead")}</th>
                 <th className="px-4 py-3 text-right">{t("colFailed")}</th>
                 <th className="px-4 py-3">{t("colStatus")}</th>
@@ -605,19 +607,23 @@ export function CampaignsOverviewClient() {
             <tbody>
               {listBusy && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-16 text-center text-fg-muted">
+                  <td colSpan={9} className="px-4 py-16 text-center text-fg-muted">
                     <Loader2 className="mx-auto h-8 w-8 animate-spin opacity-40" />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-fg-secondary">
+                  <td colSpan={9} className="px-4 py-12 text-center text-fg-secondary">
                     {t("overviewEmpty")}
                   </td>
                 </tr>
               ) : (
                 rows.map((c) => {
                   const pctSent = formatPctOfTotal(c.sentOk, c.totalRecipients);
+                  const pctDelivered = formatPctOfTotal(
+                    c.deliveredCount,
+                    c.totalRecipients,
+                  );
                   const pctRead = formatPctOfTotal(
                     c.readCount,
                     c.totalRecipients,
@@ -672,6 +678,23 @@ export function CampaignsOverviewClient() {
                           value={c.sentOk}
                           total={c.totalRecipients}
                           colorClass="bg-emerald-500"
+                        />
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="tabular-nums text-violet-900">
+                          {c.deliveredCount}
+                          {pctDelivered ? (
+                            <span className="text-fg-secondary">
+                              {" "}({pctDelivered}%)
+                            </span>
+                          ) : null}
+                        </span>
+                        <CampaignMetricMicroBar
+                          value={c.deliveredCount}
+                          total={c.totalRecipients}
+                          colorClass="bg-violet-500"
                         />
                       </div>
                     </td>

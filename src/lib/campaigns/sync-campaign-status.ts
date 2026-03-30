@@ -20,8 +20,15 @@ export async function syncCampaignFinishedStatus(campaignId: string): Promise<vo
   if (rows.some((r) => inFlight.has(r.status))) return;
 
   const failed = rows.filter((r) => r.status === "failed").length;
-  const next: "completed" | "failed" =
-    failed === rows.length ? "failed" : "completed";
+  const cancelled = rows.filter((r) => r.status === "cancelled").length;
+  const success = rows.filter((r) =>
+    ["sent", "delivered", "read"].includes(r.status),
+  ).length;
+
+  let next: "completed" | "failed" | "cancelled";
+  if (failed === rows.length) next = "failed";
+  else if (cancelled === rows.length && success === 0) next = "cancelled";
+  else next = "completed";
 
   await db
     .update(campaigns)

@@ -63,6 +63,10 @@ const worker = new Worker<CampaignSendJob>(
       throw new UnrecoverableError("Recipient not found or tenant mismatch");
     }
 
+    if (recipient.status === "cancelled") {
+      return;
+    }
+
     // Fetch campaign and integration in parallel
     const [campaignRow, integrationRow] = await Promise.all([
       db

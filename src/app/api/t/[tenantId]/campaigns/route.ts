@@ -129,6 +129,7 @@ export async function GET(req: NextRequest, route: RouteCtx) {
       scheduledAt: c.scheduledAt?.toISOString() ?? null,
       totalRecipients: c.totalRecipients,
       sentOk: c.sentOk,
+      deliveredCount: c.deliveredCount,
       readCount: c.readCount,
       failedCount: c.failedCount,
     })),
