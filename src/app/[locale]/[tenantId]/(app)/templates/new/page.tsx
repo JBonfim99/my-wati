@@ -16,8 +16,25 @@ import {
   mergeTenantFixedTemplateVariableRows,
 } from "@/lib/templates/contact-template-variables";
 import { listTenantFixedFields } from "@/lib/tenant-fixed-fields/queries";
+import dynamic from "next/dynamic";
 import { getMessageTemplateDraftById } from "@/lib/templates/template-draft-queries";
-import { TemplateCreatePageClient } from "../_components/TemplateCreatePageClient";
+
+function TemplateCreateLoading() {
+  return (
+    <div className="mx-auto max-w-3xl space-y-4 p-6">
+      <div className="h-9 w-64 animate-pulse rounded-lg bg-neutral-200" />
+      <div className="ds-card h-[min(480px,70vh)] animate-pulse bg-neutral-50" />
+    </div>
+  );
+}
+
+const TemplateCreatePageClient = dynamic(
+  () =>
+    import("../_components/TemplateCreatePageClient").then((mod) => ({
+      default: mod.TemplateCreatePageClient,
+    })),
+  { loading: () => <TemplateCreateLoading /> },
+);
 
 export default async function NewTemplatePage({
   params,
@@ -37,24 +54,26 @@ export default async function NewTemplatePage({
     redirect(`/${tenantId}/templates`);
   }
 
-  const sp = await searchParams;
+  const db = getDb();
+  const [sp, tCreate, [integrationRows, fieldDefs, tenantFixedRows]] =
+    await Promise.all([
+      searchParams,
+      getTranslations("app.templates.create"),
+      Promise.all([
+        db
+          .select({
+            businessAccountId: tenantIntegrations.businessAccountId,
+          })
+          .from(tenantIntegrations)
+          .where(eq(tenantIntegrations.tenantId, ctx.tenantId))
+          .limit(1),
+        listContactFieldDefs(db, ctx.tenantId),
+        listTenantFixedFields(db, ctx.tenantId),
+      ]),
+    ]);
+
   const draftId =
     typeof sp.draftId === "string" && sp.draftId.trim() ? sp.draftId.trim() : null;
-
-  const db = getDb();
-  const tCreate = await getTranslations("app.templates.create");
-
-  const [integrationRows, fieldDefs, tenantFixedRows] = await Promise.all([
-    db
-      .select({
-        businessAccountId: tenantIntegrations.businessAccountId,
-      })
-      .from(tenantIntegrations)
-      .where(eq(tenantIntegrations.tenantId, ctx.tenantId))
-      .limit(1),
-    listContactFieldDefs(db, ctx.tenantId),
-    listTenantFixedFields(db, ctx.tenantId),
-  ]);
 
   const tenantFixedForTemplate = tenantFixedRows.map((f) => ({
     key: f.key,

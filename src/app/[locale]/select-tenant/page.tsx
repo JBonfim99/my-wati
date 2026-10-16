@@ -15,15 +15,18 @@ export default async function SelectTenantPage({
   params: Promise<{ locale: string }>;
 }) {
   await params;
-  const t = await getTranslations("app.selectTenant");
-  const user = await getSessionUser();
+  const [t, user] = await Promise.all([
+    getTranslations("app.selectTenant"),
+    getSessionUser(),
+  ]);
   if (!user) {
     redirect("/login");
   }
 
-  await ensureProfile(user);
-
-  const memberships = await listMembershipsForUser(user.id);
+  const [, memberships] = await Promise.all([
+    ensureProfile(user),
+    listMembershipsForUser(user.id),
+  ]);
   if (memberships.length === 0) {
     return (
       <div className="ds-auth-shell flex min-h-screen items-center justify-center p-6">

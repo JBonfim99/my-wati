@@ -12,27 +12,30 @@ export default async function DashboardPage({
 }: {
   params: Promise<{ tenantId: string }>;
 }) {
-  const t = await getTranslations("app.dashboard");
-  const { tenantId: tp } = await params;
+  const [t, { tenantId: tp }] = await Promise.all([
+    getTranslations("app.dashboard"),
+    params,
+  ]);
   const tenantId = parseTenantIdFromParam(tp);
   if (tenantId === null) return null;
   const ctx = await getCachedTenantSession(tenantId);
   if (!ctx) return null;
   const db = getDb();
 
-  const campaignRows = await db
-    .select()
-    .from(campaigns)
-    .where(eq(campaigns.tenantId, ctx.tenantId));
-
-  const stats = await db
-    .select({
-      status: campaignRecipients.status,
-      c: sql<number>`count(*)::int`,
-    })
-    .from(campaignRecipients)
-    .where(eq(campaignRecipients.tenantId, ctx.tenantId))
-    .groupBy(campaignRecipients.status);
+  const [campaignRows, stats] = await Promise.all([
+    db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.tenantId, ctx.tenantId)),
+    db
+      .select({
+        status: campaignRecipients.status,
+        c: sql<number>`count(*)::int`,
+      })
+      .from(campaignRecipients)
+      .where(eq(campaignRecipients.tenantId, ctx.tenantId))
+      .groupBy(campaignRecipients.status),
+  ]);
 
   return (
     <div className="space-y-8">

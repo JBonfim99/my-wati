@@ -9,8 +9,7 @@ export default async function HomePage({
 }: {
   params: Promise<{ locale: string }>;
 }) {
-  await params;
-  const user = await getSessionUser();
+  const [, user] = await Promise.all([params, getSessionUser()]);
   if (!user) {
     redirect("/login");
   }

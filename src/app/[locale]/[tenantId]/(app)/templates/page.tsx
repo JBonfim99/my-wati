@@ -32,28 +32,45 @@ export default async function TemplatesPage({
   if (!ctx) redirect("/select-tenant");
 
   const db = getDb();
-  const [integration] = await db
-    .select({
-      businessAccountId: tenantIntegrations.businessAccountId,
-    })
-    .from(tenantIntegrations)
-    .where(eq(tenantIntegrations.tenantId, ctx.tenantId))
-    .limit(1);
 
+  const [integrationRows, metaResult, draftRows] = await Promise.all([
+    db
+      .select({
+        businessAccountId: tenantIntegrations.businessAccountId,
+      })
+      .from(tenantIntegrations)
+      .where(eq(tenantIntegrations.tenantId, ctx.tenantId))
+      .limit(1),
+    (async (): Promise<
+      | { ok: true; data: MessageTemplateRecord[] }
+      | { ok: false; error: string }
+    > => {
+      try {
+        const data = await getCachedMessageTemplatesForTenant(ctx.tenantId);
+        return { ok: true, data };
+      } catch (e) {
+        return {
+          ok: false,
+          error:
+            e instanceof Error ? e.message : "Erro ao listar templates",
+        };
+      }
+    })(),
+    listMessageTemplateDrafts(db, ctx.tenantId),
+  ]);
+
+  const [integration] = integrationRows;
   const integrationConfigured = Boolean(
     integration?.businessAccountId?.trim(),
   );
 
   let metaTemplates: MessageTemplateRecord[] = [];
   let initialError: string | null = null;
-  try {
-    metaTemplates = await getCachedMessageTemplatesForTenant(ctx.tenantId);
-  } catch (e) {
-    initialError =
-      e instanceof Error ? e.message : "Erro ao listar templates";
+  if (metaResult.ok) {
+    metaTemplates = metaResult.data;
+  } else {
+    initialError = metaResult.error;
   }
-
-  const draftRows = await listMessageTemplateDrafts(db, ctx.tenantId);
   const draftRecords = draftRows.map((r) =>
     draftRowToMessageTemplateRecord({
       id: r.id,

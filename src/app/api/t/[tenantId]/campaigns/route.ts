@@ -74,15 +74,6 @@ export async function GET(req: NextRequest, route: RouteCtx) {
   const ctx = gate.ctx;
   const db = getDb();
 
-  const maybeStuck = await db
-    .select({ id: campaigns.id })
-    .from(campaigns)
-    .where(
-      and(eq(campaigns.tenantId, ctx.tenantId), eq(campaigns.status, "sending")),
-    );
-
-  await Promise.all(maybeStuck.map((row) => syncCampaignFinishedStatus(row.id)));
-
   const url = new URL(req.url);
   const parsed = queryListSchema.safeParse({
     from: url.searchParams.get("from") || undefined,
@@ -108,6 +99,16 @@ export async function GET(req: NextRequest, route: RouteCtx) {
       { status: 400 },
     );
   }
+
+  const maybeStuck = await db
+    .select({ id: campaigns.id })
+    .from(campaigns)
+    .where(
+      and(eq(campaigns.tenantId, ctx.tenantId), eq(campaigns.status, "sending")),
+    );
+
+  await Promise.all(maybeStuck.map((row) => syncCampaignFinishedStatus(row.id)));
+
   const { rows, total } = await listCampaignsPaginated(db, ctx.tenantId, {
     from: q.from,
     to: q.to,
@@ -162,32 +163,33 @@ export async function POST(req: NextRequest, route: RouteCtx) {
 
   const db = getDb();
 
-  const [listExists] = await db
-    .select()
-    .from(contactLists)
-    .where(
-      and(
-        eq(contactLists.id, body.listId),
-        eq(contactLists.tenantId, ctx.tenantId),
-      ),
-    )
-    .limit(1);
+  const [[listExists], memberContacts] = await Promise.all([
+    db
+      .select()
+      .from(contactLists)
+      .where(
+        and(
+          eq(contactLists.id, body.listId),
+          eq(contactLists.tenantId, ctx.tenantId),
+        ),
+      )
+      .limit(1),
+    db
+      .select({
+        id: contacts.id,
+        phoneE164: contacts.phoneE164,
+      })
+      .from(contacts)
+      .innerJoin(
+        contactListMembers,
+        eq(contactListMembers.contactId, contacts.id),
+      )
+      .where(eq(contactListMembers.listId, body.listId)),
+  ]);
 
   if (!listExists) {
     return NextResponse.json({ error: "List not found" }, { status: 404 });
   }
-
-  const memberContacts = await db
-    .select({
-      id: contacts.id,
-      phoneE164: contacts.phoneE164,
-    })
-    .from(contacts)
-    .innerJoin(
-      contactListMembers,
-      eq(contactListMembers.contactId, contacts.id),
-    )
-    .where(eq(contactListMembers.listId, body.listId));
 
   if (!memberContacts.length) {
     return NextResponse.json({ error: "List is empty" }, { status: 400 });
@@ -235,13 +237,14 @@ export async function POST(req: NextRequest, route: RouteCtx) {
     .returning({ id: campaignRecipients.id });
 
   const queue = getCampaignQueue();
-  for (const r of inserted) {
-    await queue.add(
-      "send",
-      { recipientId: r.id, tenantId: ctx.tenantId },
-      { jobId: `${r.id}`, ...(delayMs > 0 ? { delay: delayMs } : {}) },
-    );
-  }
+  const jobOpts = delayMs > 0 ? { delay: delayMs } : {};
+  await queue.addBulk(
+    inserted.map((r) => ({
+      name: "send" as const,
+      data: { recipientId: r.id, tenantId: ctx.tenantId },
+      opts: { jobId: `${r.id}`, ...jobOpts },
+    })),
+  );
 
   if (delayMs === 0) {
     await db

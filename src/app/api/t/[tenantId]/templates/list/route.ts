@@ -50,19 +50,6 @@ export async function GET(req: NextRequest, route: RouteCtx) {
   if (!gate.ok) return gate.response;
   const ctx = gate.ctx;
 
-  const db = getDb();
-  const [integration] = await db
-    .select({
-      businessAccountId: tenantIntegrations.businessAccountId,
-    })
-    .from(tenantIntegrations)
-    .where(eq(tenantIntegrations.tenantId, ctx.tenantId))
-    .limit(1);
-
-  const integrationConfigured = Boolean(
-    integration?.businessAccountId?.trim(),
-  );
-
   const url = new URL(req.url);
   const cursor = decodeTemplatesListCursor(url.searchParams.get("cursor"));
   const limitRaw = Number.parseInt(
@@ -86,6 +73,24 @@ export async function GET(req: NextRequest, route: RouteCtx) {
     sort,
   };
 
+  const db = getDb();
+  const [integrationRows, draftRows, wabaSnapshots] = await Promise.all([
+    db
+      .select({
+        businessAccountId: tenantIntegrations.businessAccountId,
+      })
+      .from(tenantIntegrations)
+      .where(eq(tenantIntegrations.tenantId, ctx.tenantId))
+      .limit(1),
+    listMessageTemplateDrafts(db, ctx.tenantId),
+    listWabaTemplateStatusSnapshots(db, ctx.tenantId),
+  ]);
+
+  const [integration] = integrationRows;
+  const integrationConfigured = Boolean(
+    integration?.businessAccountId?.trim(),
+  );
+
   let metaTemplates: MessageTemplateRecord[] = [];
   let loadError: string | null = null;
 
@@ -97,11 +102,6 @@ export async function GET(req: NextRequest, route: RouteCtx) {
         e instanceof Error ? e.message : "Erro ao listar templates";
     }
   }
-
-  const [draftRows, wabaSnapshots] = await Promise.all([
-    listMessageTemplateDrafts(db, ctx.tenantId),
-    listWabaTemplateStatusSnapshots(db, ctx.tenantId),
-  ]);
   const draftRecords = draftRows.map((r) =>
     draftRowToMessageTemplateRecord({
       id: r.id,
